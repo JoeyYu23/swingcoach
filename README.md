@@ -59,6 +59,35 @@ npm run dev
 
 App runs at `http://localhost:3000`
 
+### Snapdragon X Elite (Windows ARM64)
+
+One-click setup for Qualcomm Oryon CPU devices:
+
+**PowerShell:**
+```powershell
+.\setup-snapdragon.ps1
+```
+
+**CMD:**
+```cmd
+setup-snapdragon.bat
+```
+
+**Manual Setup:**
+```bash
+# Install Python ARM64
+winget install Python.Python.3.11 --architecture arm64
+
+# Setup backend
+cd backend
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
+```
+
+> **Note**: MediaPipe 0.10+ supports Windows ARM64 natively. No code changes required.
+
 ## API Endpoints
 
 | Endpoint | Method | Description |
