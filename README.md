@@ -88,6 +88,30 @@ python app.py
 
 > **Note**: MediaPipe 0.10+ supports Windows ARM64 natively. No code changes required.
 
+### WSL (Windows Subsystem for Linux)
+
+```bash
+chmod +x setup-wsl.sh
+./setup-wsl.sh
+```
+
+Or manually:
+```bash
+# Install dependencies
+sudo apt-get update
+sudo apt-get install -y python3 python3-pip python3-venv
+sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
+
+# Setup backend
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
+
+> **Tip**: WSL2 backend can be accessed from Windows browser at `http://localhost:8001`
+
 ## API Endpoints
 
 | Endpoint | Method | Description |
