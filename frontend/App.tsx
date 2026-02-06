@@ -3,7 +3,7 @@ import { ViewState, AppState, AnalysisResult } from './types';
 import { LandingPage } from './components/LandingPage';
 import { RecordingPage } from './components/RecordingPage';
 import { ResultsPage } from './components/ResultsPage';
-import { analyzeSwing } from './services/geminiService';
+import { analyzeSwingComplete } from './services/geminiService';
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
@@ -33,24 +33,24 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, videoFile: null, videoPreviewUrl: null }));
   };
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = async (rotation: number = 0) => {
     if (!state.videoFile) return;
 
     setState(prev => ({ ...prev, view: 'analyzing', error: null }));
 
     try {
-      const result = await analyzeSwing(state.videoFile);
-      setState(prev => ({ 
-        ...prev, 
-        view: 'results', 
-        result: result 
+      const result = await analyzeSwingComplete(state.videoFile, rotation);
+      setState(prev => ({
+        ...prev,
+        view: 'results',
+        result: result
       }));
     } catch (err: any) {
       console.error(err);
-      setState(prev => ({ 
-        ...prev, 
+      setState(prev => ({
+        ...prev,
         view: 'recording', // Go back to recording so they can try again
-        error: "Analysis failed. Please try a shorter video or different angle." 
+        error: "Analysis failed. Please try a shorter video or different angle."
       }));
       alert("Failed to analyze video. Please ensure API Key is set and video is valid.");
     }

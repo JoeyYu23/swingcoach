@@ -4,7 +4,7 @@ import { Button } from './Button';
 interface Props {
   onFileSelect: (file: File) => void;
   videoPreview: string | null;
-  onAnalyze: () => void;
+  onAnalyze: (rotation: number) => void;
   isAnalyzing: boolean;
   onRetake: () => void;
 }
@@ -26,6 +26,19 @@ export const RecordingPage: React.FC<Props> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [analysisStep, setAnalysisStep] = useState(0);
+  const [rotation, setRotation] = useState(0); // 0, 90, 180, 270
+
+  const rotateVideo = () => {
+    setRotation((prev) => (prev + 90) % 360);
+  };
+
+  const getRotationStyle = () => {
+    if (rotation === 0) return {};
+    return {
+      transform: `rotate(${rotation}deg)`,
+      transformOrigin: 'center center',
+    };
+  };
 
   useEffect(() => {
     if (!isAnalyzing) {
@@ -62,16 +75,29 @@ export const RecordingPage: React.FC<Props> = ({
       <div className="flex-1 flex flex-col justify-center items-center relative rounded-2xl overflow-hidden bg-gray-900 border-2 border-dashed border-gray-700">
         
         {videoPreview ? (
-          <div className="relative w-full h-full">
+          <div className="relative w-full h-full overflow-hidden">
             <video
               src={videoPreview}
-              className={`w-full h-full object-cover ${isAnalyzing ? 'opacity-60' : ''}`}
+              className={`w-full h-full object-contain ${isAnalyzing ? 'opacity-60' : ''}`}
+              style={getRotationStyle()}
               controls={!isAnalyzing}
               playsInline
               autoPlay
               loop
               muted
             />
+            {/* Rotate Button */}
+            {!isAnalyzing && (
+              <button
+                onClick={rotateVideo}
+                className="absolute top-4 right-4 bg-gray-900/80 text-white rounded-lg p-3 z-20 hover:bg-gray-800"
+                title="Rotate Video"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+            )}
             {isAnalyzing && (
               <>
                 {/* Scan line animation */}
@@ -130,11 +156,14 @@ export const RecordingPage: React.FC<Props> = ({
       <div className="mt-6 space-y-3">
         {videoPreview ? (
           <>
-            <Button onClick={onAnalyze} fullWidth isLoading={isAnalyzing}>
+            <Button onClick={() => onAnalyze(rotation)} fullWidth isLoading={isAnalyzing}>
               ✨ Analyze Swing
             </Button>
-            <button 
-              onClick={onRetake}
+            {rotation !== 0 && (
+              <p className="text-center text-xs text-gray-500">Video rotated {rotation}°</p>
+            )}
+            <button
+              onClick={() => { setRotation(0); onRetake(); }}
               className="w-full text-gray-400 text-sm py-2 underline"
               disabled={isAnalyzing}
             >

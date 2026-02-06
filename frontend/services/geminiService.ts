@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { AnalysisResult } from "../types";
+import { AnalysisResult, PoseAnalysisResult } from "../types";
+import { analyzePose, checkBackendHealth, getAnnotatedVideo } from "./poseService";
 
 // NOTE: In a real production app, never expose API keys on the frontend.
 // This is for Hackathon/Demo purposes only as requested.
@@ -114,4 +115,27 @@ export const analyzeSwing = async (file: File): Promise<AnalysisResult> => {
     console.error("Gemini Analysis Error:", error);
     throw error;
   }
+};
+
+/**
+ * Combined analysis: Gemini AI + Pose Estimation
+ * Runs both in parallel for best performance.
+ */
+export const analyzeSwingComplete = async (file: File, rotation: number = 0): Promise<AnalysisResult> => {
+  // Check if backend is available
+  const backendAvailable = await checkBackendHealth();
+
+  // Run analyses in parallel
+  const [geminiResult, poseResult, annotatedUrl] = await Promise.all([
+    analyzeSwing(file),
+    backendAvailable ? analyzePose(file, rotation).catch(() => null) : Promise.resolve(null),
+    backendAvailable ? getAnnotatedVideo(file, rotation).catch(() => null) : Promise.resolve(null),
+  ]);
+
+  // Combine results
+  return {
+    ...geminiResult,
+    pose_analysis: poseResult || undefined,
+    annotated_video_url: annotatedUrl || undefined,
+  };
 };

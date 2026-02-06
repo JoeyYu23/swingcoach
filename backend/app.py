@@ -36,6 +36,33 @@ pose_backend: Optional[MediaPipeBackend] = None
 analyzer: Optional[TennisSwingAnalyzer] = None
 
 
+class FrameData(BaseModel):
+    """Data for a single frame."""
+    frame_index: int
+    phase: str
+    # Arm angles
+    left_elbow: Optional[float] = None
+    right_elbow: Optional[float] = None
+    left_shoulder: Optional[float] = None
+    right_shoulder: Optional[float] = None
+    left_wrist: Optional[float] = None
+    right_wrist: Optional[float] = None
+    # Leg angles
+    left_hip: Optional[float] = None
+    right_hip: Optional[float] = None
+    left_knee: Optional[float] = None
+    right_knee: Optional[float] = None
+    left_ankle: Optional[float] = None
+    right_ankle: Optional[float] = None
+    # Posture metrics
+    torso_rotation: Optional[float] = None
+    shoulder_tilt: Optional[float] = None
+    hip_tilt: Optional[float] = None
+    body_lean: Optional[float] = None
+    head_tilt: Optional[float] = None
+    spine_curve: Optional[float] = None
+
+
 class AnalysisResponse(BaseModel):
     """Response model for swing analysis."""
     total_frames: int
@@ -47,6 +74,12 @@ class AnalysisResponse(BaseModel):
     issues: List[str]
     recommendations: List[str]
     feedback_text: str
+    # Summary angles at contact point
+    contact_angles: Optional[dict] = None
+    # Posture metrics at contact
+    contact_posture: Optional[dict] = None
+    # Time series data
+    frames: List[FrameData]
 
 
 class FrameAngles(BaseModel):
@@ -93,13 +126,25 @@ async def health_check():
     return {"status": "ok", "backend": "mediapipe"}
 
 
+def rotate_frame(frame: np.ndarray, rotation: int) -> np.ndarray:
+    """Rotate frame by given degrees (0, 90, 180, 270)."""
+    if rotation == 90:
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    elif rotation == 180:
+        return cv2.rotate(frame, cv2.ROTATE_180)
+    elif rotation == 270:
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return frame
+
+
 @app.post("/api/analyze-video", response_model=AnalysisResponse)
-async def analyze_video(file: UploadFile = File(...)):
+async def analyze_video(file: UploadFile = File(...), rotation: int = 0):
     """
     Analyze a tennis swing video.
 
     Args:
         file: Video file (mp4, mov, etc.)
+        rotation: Rotation angle (0, 90, 180, 270)
 
     Returns:
         Complete swing analysis with scores and recommendations
@@ -129,6 +174,10 @@ async def analyze_video(file: UploadFile = File(...)):
             if not ret:
                 break
 
+            # Apply rotation if specified
+            if rotation != 0:
+                frame = rotate_frame(frame, rotation)
+
             pose_result = pose_backend.process_frame(frame)
             if pose_result and pose_result.is_valid():
                 pose_results.append(pose_result)
@@ -150,6 +199,57 @@ async def analyze_video(file: UploadFile = File(...)):
         else:
             feedback = "Great swing! Keep up the good work."
 
+        # Build time series data with all angles
+        calc = AngleCalculator(use_3d=True)
+        frames_data = []
+        contact_angles = None
+        contact_posture = None
+
+        for i, (pose, metrics) in enumerate(zip(pose_results, result.metrics_per_frame)):
+            # Calculate all joint angles
+            angles = calc.calculate_all_angles(pose)
+            # Calculate posture metrics
+            posture = calc.calculate_posture_metrics(pose)
+
+            frame_data = FrameData(
+                frame_index=metrics.frame_index,
+                phase=metrics.phase.value,
+                # Arm angles
+                left_elbow=angles.get('left_elbow'),
+                right_elbow=angles.get('right_elbow'),
+                left_shoulder=angles.get('left_shoulder'),
+                right_shoulder=angles.get('right_shoulder'),
+                left_wrist=angles.get('left_wrist'),
+                right_wrist=angles.get('right_wrist'),
+                # Leg angles
+                left_hip=angles.get('left_hip'),
+                right_hip=angles.get('right_hip'),
+                left_knee=angles.get('left_knee'),
+                right_knee=angles.get('right_knee'),
+                left_ankle=angles.get('left_ankle'),
+                right_ankle=angles.get('right_ankle'),
+                # Posture metrics
+                torso_rotation=metrics.torso_rotation,
+                shoulder_tilt=posture.get('shoulder_tilt'),
+                hip_tilt=posture.get('hip_tilt'),
+                body_lean=posture.get('body_lean'),
+                head_tilt=posture.get('head_tilt'),
+                spine_curve=posture.get('spine_curve'),
+            )
+            frames_data.append(frame_data)
+
+            # Capture angles at contact point
+            if metrics.phase.value == 'contact' and contact_angles is None:
+                contact_angles = angles
+                contact_posture = posture
+
+        # Fallback: if no contact phase found, use middle frame
+        if contact_angles is None and len(frames_data) > 0:
+            mid_idx = len(pose_results) // 2
+            mid_pose = pose_results[mid_idx]
+            contact_angles = calc.calculate_all_angles(mid_pose)
+            contact_posture = calc.calculate_posture_metrics(mid_pose)
+
         return AnalysisResponse(
             total_frames=result.total_frames,
             overall_score=result.overall_score,
@@ -160,6 +260,9 @@ async def analyze_video(file: UploadFile = File(...)):
             issues=result.issues,
             recommendations=result.recommendations,
             feedback_text=feedback,
+            contact_angles=contact_angles,
+            contact_posture=contact_posture,
+            frames=frames_data,
         )
 
     finally:
@@ -207,12 +310,13 @@ async def analyze_frame(file: UploadFile = File(...)):
 
 
 @app.post("/api/annotate-video")
-async def annotate_video(file: UploadFile = File(...)):
+async def annotate_video(file: UploadFile = File(...), rotation: int = 0):
     """
     Process video and return annotated version with skeleton overlay.
 
     Args:
         file: Video file
+        rotation: Rotation angle (0, 90, 180, 270)
 
     Returns:
         Annotated video file with skeleton and angles
@@ -240,7 +344,12 @@ async def annotate_video(file: UploadFile = File(...)):
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # Adjust dimensions if rotating 90 or 270 degrees
+        if rotation in [90, 270]:
+            width, height = height, width
+
+        # Use H.264 codec for browser compatibility
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
         calc = AngleCalculator(use_3d=True)
@@ -249,6 +358,10 @@ async def annotate_video(file: UploadFile = File(...)):
             ret, frame = cap.read()
             if not ret:
                 break
+
+            # Apply rotation if specified
+            if rotation != 0:
+                frame = rotate_frame(frame, rotation)
 
             pose_result = pose_backend.process_frame(frame)
 
@@ -286,4 +399,4 @@ async def annotate_video(file: UploadFile = File(...)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
