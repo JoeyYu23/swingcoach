@@ -23,6 +23,20 @@ from dotenv import load_dotenv
 from vision_provider import analyze_video, generate_tts, get_provider_name
 from network_info import get_local_ip, get_connection_url
 
+# Path to the latest IMU swing data written by server.py
+_IMU_LATEST = Path(__file__).resolve().parent.parent / "swing_data" / "latest_swing.json"
+
+
+def _load_latest_imu() -> dict | None:
+    """Load the most recent IMU swing result, or None if unavailable."""
+    try:
+        if _IMU_LATEST.is_file():
+            import json as _json
+            return _json.loads(_IMU_LATEST.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return None
+
 logger = logging.getLogger(__name__)
 
 # Load .env file (for GEMINI_API_KEY etc.)
@@ -407,6 +421,9 @@ async def analyze_swing(
         pose_error = None
         vision_error = None
 
+        # Load latest IMU data (if the IMU server has captured a swing)
+        imu_data = _load_latest_imu()
+
         # --- Run pose (if available) and vision in parallel ---
         if pose_backend and analyzer:
             pose_coro = loop.run_in_executor(
@@ -414,7 +431,7 @@ async def analyze_swing(
             )
             results = await asyncio.gather(
                 pose_coro,
-                analyze_video(video_bytes, "video/mp4"),
+                analyze_video(video_bytes, "video/mp4", imu_data=imu_data),
                 return_exceptions=True,
             )
             if isinstance(results[0], Exception):
@@ -428,7 +445,7 @@ async def analyze_swing(
         else:
             pose_error = "MediaPipe unavailable — pose analysis skipped"
             try:
-                vision_result = await analyze_video(video_bytes, "video/mp4")
+                vision_result = await analyze_video(video_bytes, "video/mp4", imu_data=imu_data)
             except Exception as e:
                 vision_error = str(e)
 

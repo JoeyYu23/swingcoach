@@ -8,7 +8,7 @@ import os
 from google import genai
 from google.genai import types
 
-from prompts import SYSTEM_PROMPT, VISION_PROMPT
+from prompts import SYSTEM_PROMPT, build_vision_prompt
 
 
 _client: genai.Client | None = None
@@ -41,7 +41,7 @@ class GeminiAnalysisResult:
 
 
 async def analyze_video_with_gemini(
-    video_bytes: bytes, mime_type: str = "video/mp4"
+    video_bytes: bytes, mime_type: str = "video/mp4", *, imu_data: dict | None = None
 ) -> GeminiAnalysisResult:
     """Send video to Gemini Vision and get coaching feedback.
 
@@ -49,6 +49,7 @@ async def analyze_video_with_gemini(
     """
     client = _get_client()
     video_b64 = base64.standard_b64encode(video_bytes).decode("ascii")
+    prompt = build_vision_prompt(imu_data)
 
     def _call() -> str:
         response = client.models.generate_content(
@@ -61,7 +62,7 @@ async def analyze_video_with_gemini(
                             data=video_b64,
                         )
                     ),
-                    types.Part(text=VISION_PROMPT),
+                    types.Part(text=prompt),
                 ]
             ),
             config=types.GenerateContentConfig(

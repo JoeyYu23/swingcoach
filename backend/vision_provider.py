@@ -15,16 +15,16 @@ def get_provider_name() -> str:
     return os.environ.get("VISION_PROVIDER", "local").lower()
 
 
-async def analyze_video(video_bytes: bytes, mime_type: str = "video/mp4"):
+async def analyze_video(video_bytes: bytes, mime_type: str = "video/mp4", imu_data: dict | None = None):
     """Route video analysis to the configured provider."""
     provider = get_provider_name()
 
     if provider == "gemini":
         from gemini_service import analyze_video_with_gemini
-        return await analyze_video_with_gemini(video_bytes, mime_type)
+        return await analyze_video_with_gemini(video_bytes, mime_type, imu_data=imu_data)
     else:
         from lmstudio_service import analyze_video_with_lmstudio
-        return await analyze_video_with_lmstudio(video_bytes, mime_type)
+        return await analyze_video_with_lmstudio(video_bytes, mime_type, imu_data=imu_data)
 
 
 async def generate_tts(text: str) -> str | None:

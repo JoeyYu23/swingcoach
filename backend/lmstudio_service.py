@@ -19,7 +19,7 @@ from typing import List
 import httpx
 from PIL import Image
 
-from prompts import SYSTEM_PROMPT, VISION_PROMPT
+from prompts import SYSTEM_PROMPT, build_vision_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +187,7 @@ def extract_frames(
 
 
 async def analyze_video_with_lmstudio(
-    video_bytes: bytes, mime_type: str = "video/mp4"
+    video_bytes: bytes, mime_type: str = "video/mp4", *, imu_data: dict | None = None
 ) -> LmStudioAnalysisResult:
     """Send video frames to LM Studio for vision analysis.
 
@@ -199,6 +199,8 @@ async def analyze_video_with_lmstudio(
     if not frames_b64:
         raise RuntimeError("No frames could be extracted from video")
 
+    prompt = build_vision_prompt(imu_data)
+
     # Build multi-image message for OpenAI-compatible API
     content: list = []
     for i, b64 in enumerate(frames_b64):
@@ -206,7 +208,7 @@ async def analyze_video_with_lmstudio(
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
         })
-    content.append({"type": "text", "text": VISION_PROMPT})
+    content.append({"type": "text", "text": prompt})
 
     messages = []
     if SYSTEM_PROMPT:

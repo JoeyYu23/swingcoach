@@ -120,6 +120,18 @@ class Handler(BaseHTTPRequestHandler):
             if path:
                 print(f"  Plot saved: {path}")
 
+            # Save swing result as JSON for the backend VLM pipeline
+            imu_dir = "swing_data"
+            os.makedirs(imu_dir, exist_ok=True)
+            imu_path = os.path.join(imu_dir, f"swing_{event_count:04d}.json")
+            with open(imu_path, "w") as f:
+                json.dump(result, f)
+            # Also write a latest pointer for the backend to pick up
+            latest_path = os.path.join(imu_dir, "latest_swing.json")
+            with open(latest_path, "w") as f:
+                json.dump(result, f)
+            print(f"  IMU data saved: {imu_path}")
+
             print(f"{'='*70}\n")
 
         else:  # live
