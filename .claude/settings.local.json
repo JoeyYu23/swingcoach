@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(netsh interface portproxy:*)"
+      "Bash(netsh interface portproxy:*)",
+      "Bash(git config:*)"
     ]
   }
 }
