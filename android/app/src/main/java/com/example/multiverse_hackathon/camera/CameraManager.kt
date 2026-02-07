@@ -41,7 +41,7 @@ class CameraManager(
                 }
 
                 val recorder = Recorder.Builder()
-                    .setQualitySelector(QualitySelector.from(Quality.HD))
+                    .setQualitySelector(QualitySelector.from(Quality.SD))
                     .build()
                 videoCapture = VideoCapture.withOutput(recorder)
 
