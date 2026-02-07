@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netsh interface portproxy:*)",
+      "Bash(git config:*)",
+      "Bash(gh auth:*)"
+    ]
+  }
+}

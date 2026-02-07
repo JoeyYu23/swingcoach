@@ -1,3 +1,45 @@
+# Dependencies
+node_modules/
+venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 .DS_Store
+
+# Models (large files)
+models/*.task
+models/*.onnx
+models/*.pt
+
+# Logs
+*.log
+logs/
+
+# Temp files
+tmp/
+temp/
+*.tmp
+
+# Test coverage
+coverage/
+.coverage
+htmlcov/
+
+# OS
+Thumbs.db

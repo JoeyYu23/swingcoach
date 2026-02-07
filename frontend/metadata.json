@@ -1,0 +1,8 @@
+{
+  "name": "AI Tennis Coach",
+  "description": "Record one swing. Get coach-like feedback immediately. Powered by Gemini.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
