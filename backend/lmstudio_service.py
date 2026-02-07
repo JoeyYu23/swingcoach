@@ -193,8 +193,15 @@ async def analyze_video_with_lmstudio(
 
     Extracts frames in a thread pool, then POSTs to the OpenAI-compatible endpoint.
     """
+    import time as _time
+
+    t0 = _time.time()
     loop = asyncio.get_event_loop()
     frames_b64 = await loop.run_in_executor(None, extract_frames, video_bytes)
+    t_extract = _time.time()
+    logger.info("[TIMING] Frame extraction: %.2fs (%d frames, %d KB total)",
+                t_extract - t0, len(frames_b64),
+                sum(len(f) for f in frames_b64) // 1024 if frames_b64 else 0)
 
     if not frames_b64:
         raise RuntimeError("No frames could be extracted from video")
@@ -223,6 +230,7 @@ async def analyze_video_with_lmstudio(
     url = f"{LMSTUDIO_URL}/v1/chat/completions"
     logger.info("Sending %d frames to LM Studio at %s", len(frames_b64), url)
 
+    t_pre_llm = _time.time()
     async with httpx.AsyncClient(timeout=120.0) as client:
         try:
             resp = await client.post(url, json=payload)
@@ -232,6 +240,10 @@ async def analyze_video_with_lmstudio(
                 f"Cannot connect to LM Studio at {LMSTUDIO_URL}. "
                 "Is LM Studio running with a model loaded?"
             )
+    t_llm = _time.time()
+    logger.info("[TIMING] LLM inference: %.2fs", t_llm - t_pre_llm)
+    logger.info("[TIMING] Total pipeline: %.2fs (extract=%.2fs + llm=%.2fs)",
+                t_llm - t0, t_extract - t0, t_llm - t_pre_llm)
 
     data = resp.json()
     raw_text = data["choices"][0]["message"]["content"]
