@@ -1,92 +1,107 @@
 # SwingCoach 🎾
 
-AI-powered tennis swing analysis using pose estimation and machine learning.
+AI-powered tennis swing analysis using multi-device orchestration, edge compute, and cloud AI.
+
+Built for the **Qualcomm Snapdragon Multiverse Hackathon** (Columbia, Feb 2026).
 
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![React](https://img.shields.io/badge/React-19-61DAFB.svg)
+![Android](https://img.shields.io/badge/Android-Kotlin-green.svg)
+
+## How It Works
+
+Phone captures video → PC runs edge CV (MediaPipe on Snapdragon) + cloud AI (Gemini) in parallel → returns combined analysis back to phone.
+
+```
+Phone POST /api/analyze-swing (video)
+  │
+  ├─ PARALLEL ─┬─ MediaPipe Pose (edge, ~3s)
+  │             └─ Gemini Vision (cloud, ~4s)
+  │
+  ├─ SEQUENTIAL ── Gemini TTS (cloud, ~1s)
+  │
+  └─ Response: { pose_analysis, gemini_analysis, audio_base64, processing_info }
+```
 
 ## Features
 
-- **Real-time Pose Estimation**: 33 keypoints tracking using MediaPipe
+- **Multi-Device Pipeline**: Phone → PC → Phone orchestration
+- **Edge Pose Estimation**: 33 keypoints via MediaPipe on Snapdragon
+- **AI Coaching**: Gemini Vision identifies the single biggest flaw
+- **Voice TTS**: Gemini TTS speaks coaching feedback to the player
+- **Real-time Voice Control**: On-device speech recognition (Snapdragon NPU)
 - **Joint Angle Analysis**: Precise angle calculations for all major joints
 - **Tennis-specific Metrics**: Torso rotation, follow-through, contact point analysis
-- **AI Feedback**: Gemini-powered coaching feedback
 - **Video Annotation**: Skeleton overlay and angle visualization
+- **Web Dashboard**: React frontend for detailed analysis review
 
-## Architecture
+## Monorepo Structure
 
 ```
 swingcoach/
-├── frontend/          # React + TypeScript UI
-│   ├── components/    # UI components
-│   ├── services/      # API services
-│   └── ...
-│
-├── backend/           # FastAPI server
-│   ├── pose/          # Pose estimation (MediaPipe)
-│   │   ├── mediapipe_backend.py
-│   │   └── angle_calculator.py
-│   └── analysis/      # Tennis analysis
-│       └── tennis_analyzer.py
-│
-└── models/            # Pre-trained models
+├── android/               # Android app (Kotlin, Jetpack Compose)
+│   ├── app/src/main/      #   Voice coach, camera, edge server client
+│   └── app/src/test/      #   77+ unit tests
+├── backend/               # PC backend (Python, FastAPI)
+│   ├── app.py             #   REST API with /api/analyze-swing
+│   ├── gemini_service.py  #   Gemini Vision + TTS
+│   ├── pose/              #   MediaPipe pose estimation
+│   ├── analysis/          #   Tennis swing analyzer
+│   └── tests/             #   pytest suite
+├── frontend/              # Web dashboard (React, TypeScript, Vite)
+└── server.py              # IMU sensor server
 ```
 
 ## Quick Start
 
-### Backend
+### 1. PC Backend (WSL recommended for ARM64)
 
 ```bash
 cd backend
+cp .env.example .env
+# Edit .env and add your Gemini API key
+
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 python app.py
 ```
 
-API runs at `http://localhost:8000`
+The server prints your LAN IP on startup:
+```
+SwingCoach API ready!
+  LAN IP:  192.168.1.100
+  Phone connect URL: http://192.168.1.100:8001
+```
 
-### Frontend
+### 2. Android App
+
+```bash
+cd android
+# Set API keys in local.properties:
+#   GEMINI_API_KEY=your_key
+#   OPENROUTER_API_KEY=your_key (optional)
+./gradlew installDebug
+```
+
+On the phone: **Settings** → select **Edge server** → enter your PC's URL → **Save**.
+
+### 3. Web Dashboard (optional)
 
 ```bash
 cd frontend
 cp .env.example .env.local
-# Edit .env.local and add your Gemini API key
+# Edit .env.local with your Gemini API key
 npm install
 npm run dev
 ```
 
-App runs at `http://localhost:3000`
-
 ### Snapdragon X Elite (Windows ARM64)
 
-One-click setup for Qualcomm Oryon CPU devices:
-
-**PowerShell:**
 ```powershell
 .\setup-snapdragon.ps1
 ```
-
-**CMD:**
-```cmd
-setup-snapdragon.bat
-```
-
-**Manual Setup:**
-```bash
-# Install Python ARM64
-winget install Python.Python.3.11 --architecture arm64
-
-# Setup backend
-cd backend
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
-```
-
-> **Note**: MediaPipe 0.10+ supports Windows ARM64 natively. No code changes required.
 
 ### WSL (Windows Subsystem for Linux)
 
@@ -95,97 +110,73 @@ chmod +x setup-wsl.sh
 ./setup-wsl.sh
 ```
 
-Or manually:
-```bash
-# Install dependencies
-sudo apt-get update
-sudo apt-get install -y python3 python3-pip python3-venv
-sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
-
-# Setup backend
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python app.py
-```
-
-> **Tip**: WSL2 backend can be accessed from Windows browser at `http://localhost:8001`
-
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check |
-| `/api/analyze-video` | POST | Analyze full swing video |
+| `/api/analyze-video` | POST | Pose estimation only |
+| `/api/analyze-swing` | POST | Combined: pose + Gemini + TTS |
 | `/api/analyze-frame` | POST | Analyze single frame |
-| `/api/annotate-video` | POST | Get video with skeleton overlay |
+| `/api/annotate-video` | POST | Video with skeleton overlay |
+| `/api/network-info` | GET | LAN IP and connection URLs |
 
-### Example: Analyze Video
+### Example: Combined Analysis
 
 ```bash
-curl -X POST "http://localhost:8000/api/analyze-video" \
-  -F "file=@swing.mp4"
+curl -X POST "http://localhost:8001/api/analyze-swing" \
+  -F "file=@swing.mp4" \
+  -F "rotation=0"
 ```
 
 Response:
 ```json
 {
-  "overall_score": 78,
-  "max_torso_rotation": 65.3,
-  "contact_elbow_angle": 158.2,
-  "issues": ["Elbow too bent at contact"],
-  "recommendations": ["Extend your arm more through contact"],
-  "feedback_text": "Elbow too bent at contact. Extend your arm more through contact."
+  "pose_analysis": {
+    "overall_score": 78,
+    "max_torso_rotation": 65.3,
+    "contact_elbow_angle": 158.2,
+    "issues": ["Elbow too bent at contact"],
+    "recommendations": ["Extend your arm more"],
+    "frames": [...]
+  },
+  "gemini_analysis": {
+    "feedback_text": "Drop the racket head sooner.",
+    "metric_name": "Racket Drop",
+    "metric_value": "Late"
+  },
+  "audio_base64": "...",
+  "processing_info": {
+    "total_seconds": 4.2,
+    "parallel_seconds": 3.1
+  }
 }
 ```
 
-## Metrics Calculated
+## Testing
 
-### Joint Angles
-- Elbow (left/right)
-- Shoulder (left/right)
-- Hip (left/right)
-- Knee (left/right)
-- Wrist (left/right)
-- Ankle (left/right)
+```bash
+# PC backend unit tests
+cd backend && python -m pytest tests/ -v -k "not e2e"
 
-### Posture Metrics
-- Head tilt
-- Neck angle
-- Body lean
-- Shoulder tilt
-- Hip tilt
-- Spine curve
+# PC backend E2E tests (needs API key)
+cd backend && python -m pytest tests/test_e2e_real_api.py -v
 
-### Tennis-specific
-- Torso rotation (hip-shoulder separation)
-- Racket arm extension
-- Knee bend at contact
-- Follow-through completion %
+# Android unit tests
+cd android && ./gradlew testDebugUnitTest
+
+# Android instrumented tests (needs device + PC backend running)
+cd android && ./gradlew connectedAndroidTest
+```
 
 ## Technology Stack
 
-- **Pose Estimation**: Google MediaPipe (BlazePose)
-- **Backend**: Python, FastAPI, OpenCV
-- **Frontend**: React 19, TypeScript, Vite
-- **AI**: Google Gemini API
-- **Styling**: Tailwind CSS
-
-## Supported Backends
-
-| Backend | Keypoints | 3D | Platform |
-|---------|-----------|-----|----------|
-| MediaPipe | 33 | ✅ | All |
-| HRNet (planned) | 17 | ❌ | Windows/Snapdragon |
-
-## Roadmap
-
-- [ ] Multi-person support
-- [ ] Shot type detection (forehand/backhand/serve)
-- [ ] Comparison with pro player swings
-- [ ] Mobile app (iOS/Android)
-- [ ] Real-time video streaming analysis
+- **Pose Estimation**: Google MediaPipe (BlazePose, 33 keypoints, 3D)
+- **Backend**: Python, FastAPI, OpenCV, NumPy
+- **AI**: Google Gemini 3 Flash (Vision) + Gemini 2.5 Flash (TTS)
+- **Android**: Kotlin, Jetpack Compose, CameraX, OkHttp
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
+- **Platform**: Qualcomm Snapdragon X Elite (ARM64)
 
 ## Contributing
 

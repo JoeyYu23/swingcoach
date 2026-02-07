@@ -43,3 +43,17 @@ htmlcov/
 
 # OS
 Thumbs.db
+
+# Android
+*.iml
+.gradle/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+/android/.idea/
+/android/build/
+/android/app/build/
+/android/captures/
+/android/.cxx/

@@ -3,18 +3,28 @@ SwingCoach Backend API
 FastAPI server for tennis swing analysis.
 """
 
+import asyncio
 import os
 import tempfile
+import time
+
 import cv2
 import numpy as np
 from typing import List, Optional
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
+from dotenv import load_dotenv
+
 from pose import MediaPipeBackend, AngleCalculator, PoseResult
 from analysis import TennisSwingAnalyzer
+from gemini_service import analyze_video_with_gemini, generate_tts_audio
+from network_info import get_local_ip, get_connection_url
+
+# Load .env file (for GEMINI_API_KEY etc.)
+load_dotenv()
 
 app = FastAPI(
     title="SwingCoach API",
@@ -34,6 +44,8 @@ app.add_middleware(
 # Global instances
 pose_backend: Optional[MediaPipeBackend] = None
 analyzer: Optional[TennisSwingAnalyzer] = None
+
+PORT = 8001
 
 
 class FrameData(BaseModel):
@@ -94,6 +106,21 @@ class FrameAngles(BaseModel):
     torso_rotation: Optional[float]
 
 
+class GeminiResult(BaseModel):
+    """Result from Gemini vision analysis."""
+    feedback_text: str
+    metric_name: str
+    metric_value: str
+
+
+class CompleteAnalysisResponse(BaseModel):
+    """Combined pose + Gemini analysis for the phone endpoint."""
+    pose_analysis: Optional[AnalysisResponse] = None
+    gemini_analysis: Optional[GeminiResult] = None
+    audio_base64: Optional[str] = None
+    processing_info: Optional[dict] = None
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize pose estimation backend on startup."""
@@ -109,7 +136,16 @@ async def startup():
         raise RuntimeError("Failed to initialize pose estimation backend")
 
     analyzer = TennisSwingAnalyzer(handedness='right')
-    print("SwingCoach API ready!")
+
+    ip = get_local_ip()
+    url = get_connection_url(PORT)
+    print(f"SwingCoach API ready!")
+    print(f"  LAN IP:  {ip}")
+    print(f"  Phone connect URL: {url}")
+    print(f"  Endpoints:")
+    print(f"    POST {url}/api/analyze-video   (pose only)")
+    print(f"    POST {url}/api/analyze-swing   (pose + Gemini + TTS)")
+    print(f"    GET  {url}/api/network-info")
 
 
 @app.on_event("shutdown")
@@ -137,10 +173,113 @@ def rotate_frame(frame: np.ndarray, rotation: int) -> np.ndarray:
     return frame
 
 
+def _analyze_video_sync(
+    tmp_path: str,
+    rotation: int,
+    pose_backend_inst: MediaPipeBackend,
+    analyzer_inst: TennisSwingAnalyzer,
+) -> AnalysisResponse:
+    """Run pose estimation + swing analysis on a video file (CPU-bound, synchronous).
+
+    Extracted so it can be reused by both /api/analyze-video and /api/analyze-swing.
+    """
+    pose_results = []
+    cap = cv2.VideoCapture(tmp_path)
+
+    if not cap.isOpened():
+        raise HTTPException(status_code=400, detail="Could not open video file")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if rotation != 0:
+            frame = rotate_frame(frame, rotation)
+        pose_result = pose_backend_inst.process_frame(frame)
+        if pose_result and pose_result.is_valid():
+            pose_results.append(pose_result)
+
+    cap.release()
+
+    if len(pose_results) < 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not detect pose in enough frames. Please ensure the full body is visible."
+        )
+
+    result = analyzer_inst.analyze_swing(pose_results)
+
+    # Generate feedback text
+    if result.issues:
+        feedback = f"{result.issues[0]}. {result.recommendations[0] if result.recommendations else ''}"
+    else:
+        feedback = "Great swing! Keep up the good work."
+
+    # Build time series data with all angles
+    calc = AngleCalculator(use_3d=True)
+    frames_data = []
+    contact_angles = None
+    contact_posture = None
+
+    for i, (pose, metrics) in enumerate(zip(pose_results, result.metrics_per_frame)):
+        angles = calc.calculate_all_angles(pose)
+        posture = calc.calculate_posture_metrics(pose)
+
+        frame_data = FrameData(
+            frame_index=metrics.frame_index,
+            phase=metrics.phase.value,
+            left_elbow=angles.get('left_elbow'),
+            right_elbow=angles.get('right_elbow'),
+            left_shoulder=angles.get('left_shoulder'),
+            right_shoulder=angles.get('right_shoulder'),
+            left_wrist=angles.get('left_wrist'),
+            right_wrist=angles.get('right_wrist'),
+            left_hip=angles.get('left_hip'),
+            right_hip=angles.get('right_hip'),
+            left_knee=angles.get('left_knee'),
+            right_knee=angles.get('right_knee'),
+            left_ankle=angles.get('left_ankle'),
+            right_ankle=angles.get('right_ankle'),
+            torso_rotation=metrics.torso_rotation,
+            shoulder_tilt=posture.get('shoulder_tilt'),
+            hip_tilt=posture.get('hip_tilt'),
+            body_lean=posture.get('body_lean'),
+            head_tilt=posture.get('head_tilt'),
+            spine_curve=posture.get('spine_curve'),
+        )
+        frames_data.append(frame_data)
+
+        if metrics.phase.value == 'contact' and contact_angles is None:
+            contact_angles = angles
+            contact_posture = posture
+
+    # Fallback: if no contact phase found, use middle frame
+    if contact_angles is None and len(frames_data) > 0:
+        mid_idx = len(pose_results) // 2
+        mid_pose = pose_results[mid_idx]
+        contact_angles = calc.calculate_all_angles(mid_pose)
+        contact_posture = calc.calculate_posture_metrics(mid_pose)
+
+    return AnalysisResponse(
+        total_frames=result.total_frames,
+        overall_score=result.overall_score,
+        max_torso_rotation=result.max_torso_rotation,
+        contact_elbow_angle=result.contact_elbow_angle,
+        contact_knee_angle=result.contact_knee_angle,
+        follow_through_completion=result.follow_through_completion,
+        issues=result.issues,
+        recommendations=result.recommendations,
+        feedback_text=feedback,
+        contact_angles=contact_angles,
+        contact_posture=contact_posture,
+        frames=frames_data,
+    )
+
+
 @app.post("/api/analyze-video", response_model=AnalysisResponse)
 async def analyze_video(file: UploadFile = File(...), rotation: int = 0):
     """
-    Analyze a tennis swing video.
+    Analyze a tennis swing video (pose estimation only).
 
     Args:
         file: Video file (mp4, mov, etc.)
@@ -154,7 +293,6 @@ async def analyze_video(file: UploadFile = File(...), rotation: int = 0):
     if not pose_backend or not analyzer:
         raise HTTPException(status_code=500, detail="Backend not initialized")
 
-    # Save uploaded file temporarily
     suffix = os.path.splitext(file.filename)[1] or ".mp4"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await file.read()
@@ -162,112 +300,112 @@ async def analyze_video(file: UploadFile = File(...), rotation: int = 0):
         tmp_path = tmp.name
 
     try:
-        # Process video
-        pose_results = []
-        cap = cv2.VideoCapture(tmp_path)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, _analyze_video_sync, tmp_path, rotation, pose_backend, analyzer
+        )
+    finally:
+        os.unlink(tmp_path)
 
-        if not cap.isOpened():
-            raise HTTPException(status_code=400, detail="Could not open video file")
 
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+@app.post("/api/analyze-swing", response_model=CompleteAnalysisResponse)
+async def analyze_swing(
+    file: UploadFile = File(...),
+    rotation: int = Form(0),
+):
+    """
+    Combined analysis: MediaPipe pose (edge) + Gemini vision (cloud) + TTS.
 
-            # Apply rotation if specified
-            if rotation != 0:
-                frame = rotate_frame(frame, rotation)
+    Runs pose estimation and Gemini vision in parallel, then TTS sequentially.
+    Designed for phone → PC → phone pipeline.
 
-            pose_result = pose_backend.process_frame(frame)
-            if pose_result and pose_result.is_valid():
-                pose_results.append(pose_result)
+    Args:
+        file: Video file (mp4, mov, etc.)
+        rotation: Rotation angle (0, 90, 180, 270)
 
-        cap.release()
+    Returns:
+        Combined pose analysis, Gemini feedback, TTS audio, and timing metadata
+    """
+    global pose_backend, analyzer
 
-        if len(pose_results) < 5:
-            raise HTTPException(
-                status_code=400,
-                detail="Could not detect pose in enough frames. Please ensure the full body is visible."
-            )
+    if not pose_backend or not analyzer:
+        raise HTTPException(status_code=500, detail="Backend not initialized")
 
-        # Analyze swing
-        result = analyzer.analyze_swing(pose_results)
+    # Save uploaded file
+    suffix = os.path.splitext(file.filename or "video.mp4")[1] or ".mp4"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        video_bytes = await file.read()
+        tmp.write(video_bytes)
+        tmp_path = tmp.name
 
-        # Generate feedback text
-        if result.issues:
-            feedback = f"{result.issues[0]}. {result.recommendations[0] if result.recommendations else ''}"
+    try:
+        overall_start = time.time()
+
+        # --- Run pose and Gemini in parallel ---
+        loop = asyncio.get_event_loop()
+
+        pose_task = loop.run_in_executor(
+            None, _analyze_video_sync, tmp_path, rotation, pose_backend, analyzer
+        )
+        gemini_task = analyze_video_with_gemini(video_bytes, "video/mp4")
+
+        pose_result: Optional[AnalysisResponse] = None
+        gemini_result = None
+        pose_error = None
+        gemini_error = None
+
+        # Gather both, catching errors independently
+        results = await asyncio.gather(pose_task, gemini_task, return_exceptions=True)
+
+        if isinstance(results[0], Exception):
+            pose_error = str(results[0])
         else:
-            feedback = "Great swing! Keep up the good work."
+            pose_result = results[0]
 
-        # Build time series data with all angles
-        calc = AngleCalculator(use_3d=True)
-        frames_data = []
-        contact_angles = None
-        contact_posture = None
+        if isinstance(results[1], Exception):
+            gemini_error = str(results[1])
+        else:
+            gemini_result = results[1]
 
-        for i, (pose, metrics) in enumerate(zip(pose_results, result.metrics_per_frame)):
-            # Calculate all joint angles
-            angles = calc.calculate_all_angles(pose)
-            # Calculate posture metrics
-            posture = calc.calculate_posture_metrics(pose)
+        parallel_done = time.time()
 
-            frame_data = FrameData(
-                frame_index=metrics.frame_index,
-                phase=metrics.phase.value,
-                # Arm angles
-                left_elbow=angles.get('left_elbow'),
-                right_elbow=angles.get('right_elbow'),
-                left_shoulder=angles.get('left_shoulder'),
-                right_shoulder=angles.get('right_shoulder'),
-                left_wrist=angles.get('left_wrist'),
-                right_wrist=angles.get('right_wrist'),
-                # Leg angles
-                left_hip=angles.get('left_hip'),
-                right_hip=angles.get('right_hip'),
-                left_knee=angles.get('left_knee'),
-                right_knee=angles.get('right_knee'),
-                left_ankle=angles.get('left_ankle'),
-                right_ankle=angles.get('right_ankle'),
-                # Posture metrics
-                torso_rotation=metrics.torso_rotation,
-                shoulder_tilt=posture.get('shoulder_tilt'),
-                hip_tilt=posture.get('hip_tilt'),
-                body_lean=posture.get('body_lean'),
-                head_tilt=posture.get('head_tilt'),
-                spine_curve=posture.get('spine_curve'),
-            )
-            frames_data.append(frame_data)
+        # --- TTS (sequential, only if Gemini succeeded) ---
+        audio_base64 = None
+        if gemini_result:
+            audio_base64 = await generate_tts_audio(gemini_result.feedback_text)
 
-            # Capture angles at contact point
-            if metrics.phase.value == 'contact' and contact_angles is None:
-                contact_angles = angles
-                contact_posture = posture
+        total_elapsed = time.time() - overall_start
 
-        # Fallback: if no contact phase found, use middle frame
-        if contact_angles is None and len(frames_data) > 0:
-            mid_idx = len(pose_results) // 2
-            mid_pose = pose_results[mid_idx]
-            contact_angles = calc.calculate_all_angles(mid_pose)
-            contact_posture = calc.calculate_posture_metrics(mid_pose)
-
-        return AnalysisResponse(
-            total_frames=result.total_frames,
-            overall_score=result.overall_score,
-            max_torso_rotation=result.max_torso_rotation,
-            contact_elbow_angle=result.contact_elbow_angle,
-            contact_knee_angle=result.contact_knee_angle,
-            follow_through_completion=result.follow_through_completion,
-            issues=result.issues,
-            recommendations=result.recommendations,
-            feedback_text=feedback,
-            contact_angles=contact_angles,
-            contact_posture=contact_posture,
-            frames=frames_data,
+        return CompleteAnalysisResponse(
+            pose_analysis=pose_result,
+            gemini_analysis=GeminiResult(**gemini_result.to_dict()) if gemini_result else None,
+            audio_base64=audio_base64,
+            processing_info={
+                "total_seconds": round(total_elapsed, 2),
+                "parallel_seconds": round(parallel_done - overall_start, 2),
+                "pose_error": pose_error,
+                "gemini_error": gemini_error,
+            },
         )
 
     finally:
-        # Cleanup temp file
         os.unlink(tmp_path)
+
+
+@app.get("/api/network-info")
+async def network_info():
+    """Return LAN IP and connection info for phone pairing."""
+    ip = get_local_ip()
+    url = get_connection_url(PORT)
+    return {
+        "ip": ip,
+        "url": url,
+        "endpoints": {
+            "analyze_video": f"{url}/api/analyze-video",
+            "analyze_swing": f"{url}/api/analyze-swing",
+            "health": f"{url}/health",
+        },
+    }
 
 
 @app.post("/api/analyze-frame")
@@ -399,4 +537,4 @@ async def annotate_video(file: UploadFile = File(...), rotation: int = 0):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
