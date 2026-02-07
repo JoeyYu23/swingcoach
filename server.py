@@ -13,6 +13,9 @@ import threading
 import socket
 import os
 
+from swing_analyzer import analyze_swing
+from swing_visualizer import plot_swing
+
 # Stats
 live_count = 0
 live_samples = 0
@@ -97,6 +100,23 @@ class Handler(BaseHTTPRequestHandler):
                             f"|accel|={am:6.1f}  "
                             f"gyro=({s['gyro']['x']:7.2f},{s['gyro']['y']:7.2f},{s['gyro']['z']:7.2f})"
                         )
+
+            # Analyze swing phases
+            result = analyze_swing(samples)
+            if result.get("phases"):
+                phases = result["phases"]
+                print(f"  Phases:")
+                print(f"    Preparation:    {phases['preparation']['start_ms']:.0f} – {phases['preparation']['end_ms']:.0f} ms")
+                print(f"    Acceleration:   {phases['acceleration']['start_ms']:.0f} – {phases['acceleration']['end_ms']:.0f} ms")
+                print(f"    Peak:           {phases['peak']['t_ms']:.0f} ms | {phases['peak']['gyro_mag_deg_s']:.0f} deg/s")
+                print(f"    Deceleration:   {phases['deceleration']['start_ms']:.0f} – {phases['deceleration']['end_ms']:.0f} ms")
+                print(f"    Follow-through: {phases['follow_through']['start_ms']:.0f} – {phases['follow_through']['end_ms']:.0f} ms")
+                print(f"  Swing duration: {result['swing_duration_ms']:.0f} ms")
+                path = plot_swing(result, event_number=event_count)
+                if path:
+                    print(f"  Plot saved: {path}")
+            else:
+                print(f"  No swing detected: {result.get('error')}")
 
             print(f"{'='*70}\n")
 
