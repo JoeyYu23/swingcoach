@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class EdgeServerRealTest {
 
-    private val serverUrl = "http://192.168.1.100:8001"
+    private val serverUrl = "http://10.206.81.71:8001"
     private lateinit var analyzer: EdgeServerAnalyzer
 
     @Before

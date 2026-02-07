@@ -9,8 +9,6 @@ import os
 import tempfile
 import time
 
-import cv2
-import numpy as np
 from typing import List, Optional
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -179,8 +177,9 @@ async def health_check():
     }
 
 
-def rotate_frame(frame: np.ndarray, rotation: int) -> np.ndarray:
+def rotate_frame(frame, rotation: int):
     """Rotate frame by given degrees (0, 90, 180, 270)."""
+    import cv2
     if rotation == 90:
         return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
     elif rotation == 180:
@@ -200,6 +199,7 @@ def _analyze_video_sync(
 
     Extracted so it can be reused by both /api/analyze-video and /api/analyze-swing.
     """
+    import cv2
     pose_results = []
     cap = cv2.VideoCapture(tmp_path)
 
@@ -444,6 +444,8 @@ async def analyze_frame(file: UploadFile = File(...)):
     if not pose_backend:
         raise HTTPException(status_code=503, detail="Pose estimation unavailable")
 
+    import cv2
+    import numpy as np
     content = await file.read()
     nparr = np.frombuffer(content, np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -484,6 +486,8 @@ async def annotate_video(file: UploadFile = File(...), rotation: int = 0):
 
     if not pose_backend:
         raise HTTPException(status_code=503, detail="Pose estimation unavailable")
+
+    import cv2
 
     # Save uploaded file
     suffix = os.path.splitext(file.filename)[1] or ".mp4"

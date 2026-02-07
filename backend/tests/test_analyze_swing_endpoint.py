@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from gemini_service import GeminiAnalysisResult
+from lmstudio_service import LmStudioAnalysisResult
 
 
 # ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ from gemini_service import GeminiAnalysisResult
 # ---------------------------------------------------------------------------
 
 def _mock_vision_result():
-    return GeminiAnalysisResult(
+    return LmStudioAnalysisResult(
         feedback_text="Drop your racket head sooner.",
         metric_name="Racket Drop",
         metric_value="Late",

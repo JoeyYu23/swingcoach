@@ -7,8 +7,6 @@ Default is "local" for on-device inference via LM Studio + Qwen2.5-VL.
 import os
 import logging
 
-from gemini_service import GeminiAnalysisResult
-
 logger = logging.getLogger(__name__)
 
 
@@ -17,9 +15,7 @@ def get_provider_name() -> str:
     return os.environ.get("VISION_PROVIDER", "local").lower()
 
 
-async def analyze_video(
-    video_bytes: bytes, mime_type: str = "video/mp4"
-) -> GeminiAnalysisResult:
+async def analyze_video(video_bytes: bytes, mime_type: str = "video/mp4"):
     """Route video analysis to the configured provider."""
     provider = get_provider_name()
 

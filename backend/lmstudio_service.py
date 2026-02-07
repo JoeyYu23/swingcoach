@@ -1,8 +1,8 @@
 """LM Studio vision service — local on-device inference via Qwen2.5-VL.
 
-Extracts frames from video, sends them as base64 images to
-LM Studio's OpenAI-compatible /v1/chat/completions endpoint.
-Returns the same GeminiAnalysisResult type used by gemini_service.py.
+Extracts frames from video using ffmpeg + Pillow (no cv2 needed),
+sends them as base64 images to LM Studio's OpenAI-compatible
+/v1/chat/completions endpoint.
 """
 
 import asyncio
@@ -11,13 +11,13 @@ import io
 import json
 import logging
 import os
+import shutil
+import subprocess
+import tempfile
 from typing import List
 
-import cv2
 import httpx
-import numpy as np
-
-from gemini_service import GeminiAnalysisResult, VISION_PROMPT
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,38 @@ LMSTUDIO_URL = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_MODEL = os.environ.get("LMSTUDIO_MODEL", "qwen2.5-vl-7b-instruct")
 NUM_FRAMES = int(os.environ.get("NUM_FRAMES", "6"))
 MAX_FRAME_DIM = int(os.environ.get("MAX_FRAME_DIM", "512"))
+
+# Same prompt used by gemini_service.py — duplicated here to avoid importing
+# google.genai at module level (which fails when google-genai isn't installed).
+VISION_PROMPT = """You are a professional, direct, and elite Tennis Coach.
+Analyze this short video clip of a tennis swing.
+
+Identify the ONE single biggest flaw that the player needs to fix immediately.
+Do not give a list. Give one specific correction.
+
+Return the result in JSON format with these fields:
+- feedback_text: A direct, spoken-style command to the player (max 15 words). e.g., "You are muscling it. Drop the racket head sooner."
+- metric_name: A technical term for the issue. e.g., "Contact Point", "Racket Drop", "Follow Through".
+- metric_value: The specific observation. e.g., "Too Close to Body", "Late", "Abbreviated"."""
+
+
+class LmStudioAnalysisResult:
+    """Result from LM Studio vision analysis.
+
+    Same interface as gemini_service.GeminiAnalysisResult.
+    """
+
+    def __init__(self, feedback_text: str, metric_name: str, metric_value: str):
+        self.feedback_text = feedback_text
+        self.metric_name = metric_name
+        self.metric_value = metric_value
+
+    def to_dict(self) -> dict:
+        return {
+            "feedback_text": self.feedback_text,
+            "metric_name": self.metric_name,
+            "metric_value": self.metric_value,
+        }
 
 
 def _strip_code_fences(text: str) -> str:
@@ -42,6 +74,34 @@ def _strip_code_fences(text: str) -> str:
     return stripped
 
 
+def _find_ffmpeg() -> str:
+    """Locate the ffmpeg binary. Returns path or raises RuntimeError."""
+    path = shutil.which("ffmpeg")
+    if path:
+        return path
+    # Winget installs to a well-known location
+    winget_path = os.path.expandvars(
+        r"%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe"
+    )
+    if os.path.isfile(winget_path):
+        return winget_path
+    # Scan winget Packages directory for ffmpeg
+    packages_dir = os.path.expandvars(
+        r"%LOCALAPPDATA%\Microsoft\WinGet\Packages"
+    )
+    if os.path.isdir(packages_dir):
+        import glob as _glob
+        matches = _glob.glob(
+            os.path.join(packages_dir, "Gyan.FFmpeg*", "**", "ffmpeg.exe"),
+            recursive=True,
+        )
+        if matches:
+            return matches[0]
+    raise RuntimeError(
+        "ffmpeg not found. Install it with: winget install Gyan.FFmpeg"
+    )
+
+
 def extract_frames(
     video_bytes: bytes,
     num_frames: int = NUM_FRAMES,
@@ -49,6 +109,7 @@ def extract_frames(
 ) -> List[str]:
     """Extract evenly-spaced frames from video, resize, and encode as base64 JPEG.
 
+    Uses ffmpeg + Pillow (no cv2 dependency).
     CPU-bound — should be called via run_in_executor.
 
     Args:
@@ -59,62 +120,86 @@ def extract_frames(
     Returns:
         List of base64-encoded JPEG strings.
     """
-    # Decode video from bytes buffer
-    arr = np.frombuffer(video_bytes, dtype=np.uint8)
-    # OpenCV can't read from memory directly; write to a temp buffer via VideoCapture
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-        tmp.write(video_bytes)
-        tmp_path = tmp.name
+    ffmpeg = _find_ffmpeg()
+    tmp_dir = tempfile.mkdtemp(prefix="swingcoach_")
 
     try:
-        cap = cv2.VideoCapture(tmp_path)
-        if not cap.isOpened():
-            raise RuntimeError("Could not open video for frame extraction")
+        # Write video to temp file
+        video_path = os.path.join(tmp_dir, "input.mp4")
+        with open(video_path, "wb") as f:
+            f.write(video_bytes)
 
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total_frames <= 0:
-            raise RuntimeError("Video has no frames")
+        # Probe total frame count — only replace the filename, not directory parts
+        ffmpeg_dir = os.path.dirname(ffmpeg)
+        ffprobe = os.path.join(ffmpeg_dir, "ffprobe.exe" if os.name == "nt" else "ffprobe")
+        probe_cmd = [
+            ffprobe, "-v", "error",
+            "-select_streams", "v:0",
+            "-count_frames",
+            "-show_entries", "stream=nb_read_frames",
+            "-of", "csv=p=0",
+            video_path,
+        ]
+        probe = subprocess.run(probe_cmd, capture_output=True, timeout=30)
+        try:
+            total_frames = int(probe.stdout.decode().strip())
+        except (ValueError, AttributeError):
+            total_frames = 100  # fallback estimate
 
-        # Pick evenly-spaced frame indices
-        actual_count = min(num_frames, total_frames)
-        if actual_count == 1:
-            indices = [0]
-        else:
-            indices = [
-                int(i * (total_frames - 1) / (actual_count - 1))
-                for i in range(actual_count)
-            ]
+        # Calculate step to get evenly-spaced frames
+        actual_count = min(num_frames, max(total_frames, 1))
+        step = max(1, total_frames // actual_count)
 
+        # Extract frames with ffmpeg
+        output_pattern = os.path.join(tmp_dir, "frame_%03d.jpg")
+        select_expr = f"not(mod(n\\,{step}))"
+        cmd = [
+            ffmpeg, "-i", video_path,
+            "-vf", f"select='{select_expr}'",
+            "-vsync", "vfr",
+            "-frames:v", str(num_frames),
+            "-q:v", "5",
+            output_pattern,
+            "-y", "-loglevel", "error",
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace")
+            logger.warning("ffmpeg error: %s", stderr)
+            raise RuntimeError(f"ffmpeg frame extraction failed: {stderr[:200]}")
+
+        # Read extracted JPEG files, resize with Pillow, encode as base64
         frames_b64: List[str] = []
-        for idx in indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-            ret, frame = cap.read()
-            if not ret:
-                continue
+        frame_files = sorted(
+            f for f in os.listdir(tmp_dir) if f.startswith("frame_")
+        )
 
-            # Resize keeping aspect ratio
-            h, w = frame.shape[:2]
-            if max(h, w) > max_dim:
-                scale = max_dim / max(h, w)
-                new_w = int(w * scale)
-                new_h = int(h * scale)
-                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        for fname in frame_files:
+            fpath = os.path.join(tmp_dir, fname)
+            img = Image.open(fpath)
 
-            # Encode to JPEG
-            success, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if success:
-                frames_b64.append(base64.b64encode(buf.tobytes()).decode("ascii"))
+            # Resize keeping aspect ratio if needed
+            w, h = img.size
+            if max(w, h) > max_dim:
+                scale = max_dim / max(w, h)
+                img = img.resize(
+                    (int(w * scale), int(h * scale)), Image.LANCZOS
+                )
 
-        cap.release()
+            # Encode to JPEG base64
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            frames_b64.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+
         return frames_b64
     finally:
-        os.unlink(tmp_path)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 async def analyze_video_with_lmstudio(
     video_bytes: bytes, mime_type: str = "video/mp4"
-) -> GeminiAnalysisResult:
+) -> LmStudioAnalysisResult:
     """Send video frames to LM Studio for vision analysis.
 
     Extracts frames in a thread pool, then POSTs to the OpenAI-compatible endpoint.
@@ -165,7 +250,7 @@ async def analyze_video_with_lmstudio(
     except json.JSONDecodeError:
         raise RuntimeError(f"LM Studio returned non-JSON response: {clean[:200]}")
 
-    return GeminiAnalysisResult(
+    return LmStudioAnalysisResult(
         feedback_text=parsed.get("feedback_text", ""),
         metric_name=parsed.get("metric_name", ""),
         metric_value=parsed.get("metric_value", ""),
