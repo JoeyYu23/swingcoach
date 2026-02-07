@@ -131,6 +131,7 @@ class EdgeServerAnalyzer(
 
     /** Audio base64 string from the response, if TTS was generated. */
     internal fun extractAudio(json: JSONObject): String? {
-        return json.optString("audio_base64", null)
+        val audio = json.optString("audio_base64", "")
+        return audio.ifEmpty { null }
     }
 }
