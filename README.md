@@ -12,9 +12,10 @@ Built for the **Qualcomm Snapdragon Multiverse Hackathon** at Columbia Universit
 
 | Name | Email |
 |------|-------|
-| TODO | TODO  |
-| TODO | TODO  |
-| TODO | TODO  |
+| James Zhang | tz2642@columbia.edu  |
+| Chenyang Yu | cy2758@columbia.edu  |
+| Chihao Yu   | chy007@ucsd.edu      |
+| Yang Zhou   | nbzy1995@gmail.com   |
 
 ## Demo
 
