@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tennis Swing Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #00d4ff;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+        }
+
+        .video-section {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        video {
+            width: 100%;
+            border-radius: 8px;
+            background: #000;
+        }
+
+        .controls {
+            margin-top: 15px;
+        }
+
+        .timeline-container {
+            position: relative;
+            height: 60px;
+            background: #0f0f23;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .timeline-chart {
+            width: 100%;
+            height: 100%;
+        }
+
+        .playhead {
+            position: absolute;
+            top: 0;
+            width: 2px;
+            height: 100%;
+            background: #ff4757;
+            pointer-events: none;
+            z-index: 10;
+            box-shadow: 0 0 8px #ff4757;
+        }
+
+        .keyboard-hint {
+            font-size: 11px;
+            color: #666;
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .keyboard-hint kbd {
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin: 0 2px;
+        }
+
+        #coachingTips b {
+            color: #fff;
+        }
+
+        .scrubber {
+            width: 100%;
+            margin-top: 10px;
+            -webkit-appearance: none;
+            height: 8px;
+            border-radius: 4px;
+            background: #2d3436;
+            outline: none;
+        }
+
+        .scrubber::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #00d4ff;
+            cursor: pointer;
+        }
+
+        .time-display {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 14px;
+            color: #888;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #00d4ff;
+            color: #000;
+        }
+
+        .btn-primary:hover {
+            background: #00a8cc;
+        }
+
+        .btn-secondary {
+            background: #2d3436;
+            color: #fff;
+        }
+
+        .metrics-panel {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .metrics-panel h2 {
+            margin-bottom: 20px;
+            color: #00d4ff;
+            font-size: 18px;
+        }
+
+        .metric-card {
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 12px;
+        }
+
+        .metric-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .metric-name {
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .metric-bar {
+            height: 6px;
+            background: #2d3436;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .metric-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.1s;
+        }
+
+        .metric-xfactor .metric-value { color: #00d4ff; }
+        .metric-xfactor .metric-bar-fill { background: #00d4ff; }
+
+        .metric-speed .metric-value { color: #ff6b6b; }
+        .metric-speed .metric-bar-fill { background: #ff6b6b; }
+
+        .metric-knee .metric-value { color: #ffd93d; }
+        .metric-knee .metric-bar-fill { background: #ffd93d; }
+
+        .metric-elbow .metric-value { color: #6bcb77; }
+        .metric-elbow .metric-bar-fill { background: #6bcb77; }
+
+        .metric-weight .metric-value { color: #a66cff; }
+
+        .weight-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .weight-bar {
+            flex: 1;
+            height: 8px;
+            background: #2d3436;
+            border-radius: 4px;
+            position: relative;
+        }
+
+        .weight-marker {
+            position: absolute;
+            top: -4px;
+            width: 16px;
+            height: 16px;
+            background: #a66cff;
+            border-radius: 50%;
+            transform: translateX(-50%);
+            transition: left 0.1s;
+        }
+
+        .weight-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #666;
+        }
+
+        .charts-section {
+            margin-top: 20px;
+        }
+
+        .chart-container {
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 10px 15px;
+            height: 120px;
+            cursor: pointer;
+            margin-bottom: 8px;
+        }
+
+        .chart-container:last-child {
+            margin-bottom: 0;
+        }
+
+        .chart-label {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 4px;
+        }
+
+        .file-upload {
+            text-align: center;
+            padding: 40px;
+            border: 2px dashed #444;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .file-upload.dragover {
+            border-color: #00d4ff;
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .status {
+            text-align: center;
+            padding: 20px;
+            color: #888;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #444;
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎾 Tennis Swing Analyzer</h1>
+
+        <!-- File Upload -->
+        <div id="uploadSection" class="file-upload">
+            <p>Drag & drop video file here, or click to select</p>
+            <input type="file" id="videoInput" accept="video/*" style="margin-top: 15px;">
+            <p style="margin-top: 15px; font-size: 12px; color: #666;">
+                Load sample data:
+                <button class="btn btn-primary" onclick="loadSampleData('dj')">DJ</button>
+                <button class="btn btn-primary" onclick="loadSampleData('federer')">Federer</button>
+            </p>
+        </div>
+
+        <!-- Main Content -->
+        <div id="mainContent" class="main-content hidden">
+            <!-- Video Section -->
+            <div class="video-section">
+                <video id="video" controls></video>
+
+                <div class="controls">
+                    <!-- Mini timeline with X-Factor visualization -->
+                    <div class="timeline-container">
+                        <canvas id="timelineChart" class="timeline-chart"></canvas>
+                        <div id="playhead" class="playhead"></div>
+                    </div>
+
+                    <input type="range" id="scrubber" class="scrubber" min="0" max="100" value="0">
+
+                    <div class="time-display">
+                        <span id="currentTime">0:00.00</span>
+                        <span id="totalTime">0:00.00</span>
+                    </div>
+
+                    <div class="btn-group">
+                        <button class="btn btn-primary" onclick="togglePlay()">▶️ Play/Pause</button>
+                        <button class="btn btn-secondary" onclick="stepBackward()">⏪ -1 Frame</button>
+                        <button class="btn btn-secondary" onclick="stepForward()">⏩ +1 Frame</button>
+                        <button class="btn btn-secondary" onclick="setPlaybackRate(0.25)">0.25x</button>
+                        <button class="btn btn-secondary" onclick="setPlaybackRate(0.5)">0.5x</button>
+                        <button class="btn btn-secondary" onclick="setPlaybackRate(1)">1x</button>
+                    </div>
+                    <div class="keyboard-hint">
+                        <kbd>Space</kbd> Play/Pause &nbsp;
+                        <kbd>←</kbd><kbd>→</kbd> ±1 Frame &nbsp;
+                        <kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> ±1s
+                    </div>
+                </div>
+
+                <!-- Metrics Charts -->
+                <div class="charts-section">
+                    <div class="chart-container">
+                        <div class="chart-label">X-Factor (°)</div>
+                        <canvas id="xfactorChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <div class="chart-label">Wrist Speed (m/s)</div>
+                        <canvas id="speedChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <div class="chart-label">Knee Angle (°)</div>
+                        <canvas id="kneeChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <div class="chart-label">Elbow Angle (°)</div>
+                        <canvas id="elbowChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metrics Panel -->
+            <div class="metrics-panel">
+                <h2>📊 Real-time Metrics</h2>
+
+                <div class="metric-card metric-xfactor">
+                    <div class="metric-header">
+                        <span class="metric-name">X-Factor (Hip-Shoulder Separation)</span>
+                    </div>
+                    <div class="metric-value" id="xfactorValue">0.0°</div>
+                    <div class="metric-bar">
+                        <div class="metric-bar-fill" id="xfactorBar" style="width: 50%"></div>
+                    </div>
+                </div>
+
+                <div class="metric-card metric-speed">
+                    <div class="metric-header">
+                        <span class="metric-name">Wrist Speed</span>
+                    </div>
+                    <div class="metric-value" id="speedValue">0.0 m/s</div>
+                    <div class="metric-bar">
+                        <div class="metric-bar-fill" id="speedBar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="metric-card metric-knee">
+                    <div class="metric-header">
+                        <span class="metric-name">Knee Angle</span>
+                    </div>
+                    <div class="metric-value" id="kneeValue">180°</div>
+                    <div class="metric-bar">
+                        <div class="metric-bar-fill" id="kneeBar" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <div class="metric-card metric-elbow">
+                    <div class="metric-header">
+                        <span class="metric-name">Elbow Angle</span>
+                    </div>
+                    <div class="metric-value" id="elbowValue">180°</div>
+                    <div class="metric-bar">
+                        <div class="metric-bar-fill" id="elbowBar" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <div class="metric-card metric-weight">
+                    <div class="metric-header">
+                        <span class="metric-name">Weight Distribution</span>
+                    </div>
+                    <div class="metric-value" id="weightValue">Center</div>
+                    <div class="weight-indicator">
+                        <span>L</span>
+                        <div class="weight-bar">
+                            <div class="weight-marker" id="weightMarker" style="left: 50%"></div>
+                        </div>
+                        <span>R</span>
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-header">
+                        <span class="metric-name">Current Phase</span>
+                    </div>
+                    <div class="metric-value" id="phaseValue" style="font-size: 18px; color: #fff;">—</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-header">
+                        <span class="metric-name">Statistics</span>
+                    </div>
+                    <div id="statsContent" style="font-size: 13px; line-height: 1.8;">
+                        <div>Max X-Factor: <span id="maxXF">—</span></div>
+                        <div>Max Speed: <span id="maxSpeed">—</span></div>
+                        <div>Min Knee Angle: <span id="minKnee">—</span></div>
+                    </div>
+                </div>
+
+                <div class="metric-card" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);">
+                    <div class="metric-header">
+                        <span class="metric-name">🎾 Coaching Tips</span>
+                    </div>
+                    <div id="coachingTips" style="font-size: 12px; line-height: 1.7; color: #aaa;">
+                        Loading analysis...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let metricsData = null;
+        let video = null;
+        let charts = {};  // Store all charts
+        let timelineChart = null;
+        let fps = 30;
+        let animationFrameId = null;
+        let lastUpdateTime = 0;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            video = document.getElementById('video');
+
+            // Video events
+            video.addEventListener('timeupdate', onTimeUpdate);
+            video.addEventListener('loadedmetadata', onVideoLoaded);
+            video.addEventListener('play', startUpdateLoop);
+            video.addEventListener('pause', stopUpdateLoop);
+            video.addEventListener('ended', stopUpdateLoop);
+
+            // Scrubber
+            const scrubber = document.getElementById('scrubber');
+            scrubber.addEventListener('input', onScrub);
+
+            // File upload
+            const uploadSection = document.getElementById('uploadSection');
+            const videoInput = document.getElementById('videoInput');
+
+            // Timeline click to seek
+            const timelineContainer = document.getElementById('timelineChart').parentElement;
+            timelineContainer.addEventListener('click', (e) => {
+                if (!video.duration) return;
+                const rect = timelineContainer.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const percent = x / rect.width;
+                video.currentTime = percent * video.duration;
+            });
+
+            uploadSection.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadSection.classList.add('dragover');
+            });
+
+            uploadSection.addEventListener('dragleave', () => {
+                uploadSection.classList.remove('dragover');
+            });
+
+            uploadSection.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadSection.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file) loadVideoFile(file);
+            });
+
+            videoInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) loadVideoFile(file);
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT') return;
+
+                switch(e.key) {
+                    case ' ':
+                        e.preventDefault();
+                        togglePlay();
+                        break;
+                    case 'ArrowLeft':
+                        e.preventDefault();
+                        if (e.shiftKey) {
+                            video.currentTime = Math.max(0, video.currentTime - 1);
+                        } else {
+                            stepBackward();
+                        }
+                        break;
+                    case 'ArrowRight':
+                        e.preventDefault();
+                        if (e.shiftKey) {
+                            video.currentTime = Math.min(video.duration, video.currentTime + 1);
+                        } else {
+                            stepForward();
+                        }
+                        break;
+                    case 'Home':
+                        video.currentTime = 0;
+                        break;
+                    case 'End':
+                        video.currentTime = video.duration;
+                        break;
+                }
+            });
+        });
+
+        function loadVideoFile(file) {
+            const url = URL.createObjectURL(file);
+            video.src = url;
+
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('mainContent').classList.remove('hidden');
+
+            // Generate metrics (in real app, this would call the Python backend)
+            // For demo, generate synthetic data
+            video.addEventListener('loadedmetadata', () => {
+                generateSyntheticMetrics(video.duration);
+            }, { once: true });
+        }
+
+        function loadSampleData(name) {
+            // Load pre-computed metrics
+            fetch(`metrics_${name}.json`)
+                .then(r => r.json())
+                .then(data => {
+                    metricsData = data;
+                    fps = data.fps || 30;
+
+                    document.getElementById('uploadSection').classList.add('hidden');
+                    document.getElementById('mainContent').classList.remove('hidden');
+
+                    // Set up scrubber based on metrics duration first
+                    const scrubber = document.getElementById('scrubber');
+                    scrubber.max = data.duration * 1000;
+                    scrubber.value = 0;
+
+                    // Load video
+                    video.src = data.video_path || `${name}.mp4`;
+
+                    // Wait for video metadata to update display
+                    video.addEventListener('loadedmetadata', () => {
+                        document.getElementById('totalTime').textContent = formatTime(video.duration);
+                        // Re-sync scrubber with actual video duration
+                        scrubber.max = video.duration * 1000;
+                        updateMetricsDisplay(0);
+                    }, { once: true });
+
+                    initCharts();
+                    updateStats();
+                })
+                .catch(err => {
+                    console.log('No pre-computed data, generating synthetic...');
+                    // Generate demo data
+                    generateDemoData(name);
+                });
+        }
+
+        function generateDemoData(name) {
+            // Generate synthetic demo metrics
+            const duration = 7.2;
+            const numFrames = Math.floor(duration * 30);
+
+            metricsData = {
+                fps: 30,
+                duration: duration,
+                timestamps: [],
+                x_factor: [],
+                wrist_speed: [],
+                knee_angle: [],
+                elbow_angle: [],
+                weight_distribution: []
+            };
+
+            for (let i = 0; i < numFrames; i++) {
+                const t = i / 30;
+                metricsData.timestamps.push(t);
+
+                // Simulate X-Factor: peak around t=2.5s
+                const xfBase = -20 * Math.exp(-Math.pow(t - 2.5, 2) / 0.5);
+                metricsData.x_factor.push(xfBase + Math.sin(t * 3) * 5);
+
+                // Simulate wrist speed: peaks at swing
+                const speedPeak = 15 * Math.exp(-Math.pow(t - 3, 2) / 0.3);
+                metricsData.wrist_speed.push(Math.max(0, speedPeak + Math.random() * 2));
+
+                // Knee angle: dips during preparation
+                metricsData.knee_angle.push(160 - 30 * Math.exp(-Math.pow(t - 2, 2) / 1));
+
+                // Elbow angle
+                metricsData.elbow_angle.push(120 + 40 * Math.sin(t * 2));
+
+                // Weight distribution
+                metricsData.weight_distribution.push(0.3 * Math.sin(t * 1.5));
+            }
+
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('mainContent').classList.remove('hidden');
+
+            initCharts();
+            updateStats();
+        }
+
+        function generateSyntheticMetrics(duration) {
+            const numFrames = Math.floor(duration * fps);
+
+            metricsData = {
+                fps: fps,
+                duration: duration,
+                timestamps: [],
+                x_factor: [],
+                wrist_speed: [],
+                knee_angle: [],
+                elbow_angle: [],
+                weight_distribution: []
+            };
+
+            for (let i = 0; i < numFrames; i++) {
+                const t = i / fps;
+                metricsData.timestamps.push(t);
+
+                // Generate plausible synthetic data
+                const phase = (t / duration) * Math.PI * 4;
+                metricsData.x_factor.push(25 * Math.sin(phase) + Math.random() * 5);
+                metricsData.wrist_speed.push(Math.abs(10 * Math.sin(phase * 1.5)) + Math.random() * 2);
+                metricsData.knee_angle.push(150 + 20 * Math.sin(phase * 0.8));
+                metricsData.elbow_angle.push(130 + 30 * Math.sin(phase * 1.2));
+                metricsData.weight_distribution.push(0.5 * Math.sin(phase * 0.5));
+            }
+
+            initCharts();
+            updateStats();
+        }
+
+        function initCharts() {
+            if (!metricsData) return;
+
+            // Timeline mini chart (X-Factor)
+            const timelineCtx = document.getElementById('timelineChart').getContext('2d');
+            if (timelineChart) timelineChart.destroy();
+
+            timelineChart = new Chart(timelineCtx, {
+                type: 'line',
+                data: {
+                    labels: metricsData.timestamps,
+                    datasets: [{
+                        data: metricsData.x_factor,
+                        borderColor: '#00d4ff',
+                        backgroundColor: 'rgba(0, 212, 255, 0.2)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1.5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false }
+                    },
+                    scales: {
+                        x: { display: false },
+                        y: { display: false }
+                    },
+                    animation: false
+                }
+            });
+
+            // Helper to create individual metric charts
+            function createMetricChart(canvasId, data, color, yMin, yMax) {
+                const ctx = document.getElementById(canvasId).getContext('2d');
+                if (charts[canvasId]) charts[canvasId].destroy();
+
+                charts[canvasId] = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: metricsData.timestamps,
+                        datasets: [{
+                            data: data,
+                            borderColor: color,
+                            backgroundColor: color + '20',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 0,
+                            borderWidth: 1.5
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: false },
+                            annotation: {
+                                annotations: {
+                                    playhead: {
+                                        type: 'line',
+                                        xMin: 0,
+                                        xMax: 0,
+                                        borderColor: '#ff4757',
+                                        borderWidth: 2
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { display: false },
+                            y: {
+                                display: true,
+                                min: yMin,
+                                max: yMax,
+                                ticks: { color: '#666', font: { size: 9 }, maxTicksLimit: 3 },
+                                grid: { color: '#333' }
+                            }
+                        },
+                        animation: false,
+                        onClick: (evt, elements, chart) => {
+                            if (!metricsData || !video.duration) return;
+                            const chartArea = chart.chartArea;
+                            const x = evt.native.offsetX;
+                            const percent = (x - chartArea.left) / (chartArea.right - chartArea.left);
+                            if (percent >= 0 && percent <= 1) {
+                                video.currentTime = percent * metricsData.duration;
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Calculate dynamic ranges
+            const xfMin = Math.min(...metricsData.x_factor);
+            const xfMax = Math.max(...metricsData.x_factor);
+            const xfPad = (xfMax - xfMin) * 0.1;
+
+            const speedMax = Math.max(...metricsData.wrist_speed);
+
+            const kneeMin = Math.min(...metricsData.knee_angle);
+            const kneeMax = Math.max(...metricsData.knee_angle);
+            const kneePad = (kneeMax - kneeMin) * 0.1;
+
+            const elbowMin = Math.min(...metricsData.elbow_angle);
+            const elbowMax = Math.max(...metricsData.elbow_angle);
+            const elbowPad = (elbowMax - elbowMin) * 0.1;
+
+            // Create individual charts
+            createMetricChart('xfactorChart', metricsData.x_factor, '#00d4ff',
+                xfMin - xfPad, xfMax + xfPad);
+            createMetricChart('speedChart', metricsData.wrist_speed, '#ff6b6b',
+                0, speedMax * 1.1);
+            createMetricChart('kneeChart', metricsData.knee_angle, '#ffd93d',
+                kneeMin - kneePad, kneeMax + kneePad);
+            createMetricChart('elbowChart', metricsData.elbow_angle, '#6bcb77',
+                elbowMin - elbowPad, elbowMax + elbowPad);
+
+            // Add x-axis to the last chart
+            if (charts['elbowChart']) {
+                charts['elbowChart'].options.scales.x = {
+                    display: true,
+                    ticks: {
+                        color: '#666',
+                        font: { size: 9 },
+                        callback: (val, idx) => {
+                            const t = metricsData.timestamps[idx];
+                            if (t === undefined) return '';
+                            // Show tick every ~2 seconds
+                            const interval = Math.ceil(metricsData.duration / 10);
+                            return Math.abs(t % interval) < 0.05 ? t.toFixed(1) + 's' : '';
+                        },
+                        maxRotation: 0
+                    },
+                    grid: { display: false }
+                };
+                charts['elbowChart'].update('none');
+            }
+        }
+
+        function updateStats() {
+            if (!metricsData) return;
+
+            const maxXF = Math.max(...metricsData.x_factor.map(Math.abs));
+            const maxSpeed = Math.max(...metricsData.wrist_speed);
+            const minKnee = Math.min(...metricsData.knee_angle);
+            const elbowRange = Math.max(...metricsData.elbow_angle) - Math.min(...metricsData.elbow_angle);
+
+            document.getElementById('maxXF').textContent = `${maxXF.toFixed(1)}°`;
+            document.getElementById('maxSpeed').textContent = `${maxSpeed.toFixed(1)} m/s`;
+            document.getElementById('minKnee').textContent = `${minKnee.toFixed(0)}°`;
+
+            // Generate detailed coaching paragraph
+            let p = 'Based on the video analysis, ';
+
+            // Opening assessment
+            const score = (maxXF >= 40 ? 1 : 0) + (maxSpeed >= 12 ? 1 : 0) + (minKnee <= 130 ? 1 : 0);
+            if (score >= 3) {
+                p += 'your forehand technique shows excellent overall quality. ';
+            } else if (score >= 2) {
+                p += 'your forehand has a solid foundation with some areas for improvement. ';
+            } else {
+                p += 'there are several key areas in your forehand that need attention. ';
+            }
+
+            // X-Factor feedback
+            if (maxXF >= 50) {
+                p += `Your hip-shoulder separation reaches ${maxXF.toFixed(0)}°, which is professional-level rotation that creates a powerful slingshot effect. `;
+            } else if (maxXF >= 35) {
+                p += `Hip-shoulder separation of ${maxXF.toFixed(0)}° is solid - your hips lead the rotation well, creating good elastic energy storage. `;
+            } else if (maxXF >= 20) {
+                p += `Hip-shoulder separation of only ${maxXF.toFixed(0)}° - try rotating your hips first, then shoulders, like wringing a towel to store energy. `;
+            } else {
+                p += `Hip-shoulder separation under ${maxXF.toFixed(0)}° needs work - focus on rotation mechanics as this is your main power source. `;
+            }
+
+            // Speed feedback
+            if (maxSpeed >= 18) {
+                p += `Racket speed of ${maxSpeed.toFixed(1)} m/s shows powerful acceleration with excellent wrist snap. `;
+            } else if (maxSpeed >= 12) {
+                p += `Racket speed of ${maxSpeed.toFixed(1)} m/s is above average - try loosening your grip to let the wrist accelerate more freely. `;
+            } else if (maxSpeed >= 6) {
+                p += `Racket speed of ${maxSpeed.toFixed(1)} m/s is low - you may be too tense. Try the "whip" feeling when swinging. `;
+            } else {
+                p += `Racket speed of only ${maxSpeed.toFixed(1)} m/s - practice relaxation and acceleration rhythm. `;
+            }
+
+            // Knee feedback
+            if (minKnee <= 110) {
+                p += `Knee bend to ${minKnee.toFixed(0)}° shows excellent leg loading, maximizing ground reaction force. `;
+            } else if (minKnee <= 140) {
+                p += `Knee bend of ${minKnee.toFixed(0)}° is decent - remember to push up through your legs at contact. `;
+            } else {
+                p += `Knee bend of ${minKnee.toFixed(0)}° is insufficient - standing too tall limits power transfer. Lower your center of gravity. `;
+            }
+
+            // Drill suggestion
+            p += '<br><br>💡 ';
+            if (maxXF < 35) {
+                p += '<b>Recommended Drill:</b> Stand with back to wall, practice rotation until shoulder touches wall. Feel the hip-shoulder separation. 50 reps daily.';
+            } else if (maxSpeed < 12) {
+                p += '<b>Recommended Drill:</b> Put a tennis ball in an old sock and practice the whipping motion. Relaxation is key!';
+            } else if (minKnee > 140) {
+                p += '<b>Recommended Drill:</b> Practice split-step reception, bending knees on landing to develop the habit of loading before shots.';
+            } else {
+                p += '<b>Advanced Tip:</b> Your mechanics are solid! Work on varying spin and placement to expand your tactical options.';
+            }
+
+            document.getElementById('coachingTips').innerHTML = p;
+        }
+
+        function onVideoLoaded() {
+            document.getElementById('totalTime').textContent = formatTime(video.duration);
+            document.getElementById('scrubber').max = video.duration * 1000;
+        }
+
+        function onTimeUpdate() {
+            updateDisplay();
+        }
+
+        function updateDisplay() {
+            const currentTime = video.currentTime;
+            document.getElementById('currentTime').textContent = formatTime(currentTime);
+            document.getElementById('scrubber').value = currentTime * 1000;
+
+            // Update playhead position
+            if (video.duration) {
+                const percent = (currentTime / video.duration) * 100;
+                document.getElementById('playhead').style.left = `${percent}%`;
+            }
+
+            updateMetricsDisplay(currentTime);
+        }
+
+        // High-frequency update loop for smooth playback
+        function startUpdateLoop() {
+            if (animationFrameId) return;
+
+            function tick() {
+                if (!video.paused) {
+                    const now = performance.now();
+                    // Update at ~60fps for smooth display
+                    if (now - lastUpdateTime > 16) {
+                        updateDisplay();
+                        lastUpdateTime = now;
+                    }
+                }
+                animationFrameId = requestAnimationFrame(tick);
+            }
+            tick();
+        }
+
+        function stopUpdateLoop() {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+        }
+
+        function onScrub(e) {
+            const time = e.target.value / 1000;
+            video.currentTime = time;
+            updateMetricsDisplay(time);
+        }
+
+        function updateMetricsDisplay(time) {
+            if (!metricsData) return;
+
+            // Find closest frame
+            const frameIndex = Math.min(
+                Math.floor(time * metricsData.fps),
+                metricsData.timestamps.length - 1
+            );
+
+            if (frameIndex < 0) return;
+
+            // Update all charts' playheads
+            Object.values(charts).forEach(chart => {
+                if (chart && chart.options.plugins.annotation) {
+                    chart.options.plugins.annotation.annotations.playhead.xMin = frameIndex;
+                    chart.options.plugins.annotation.annotations.playhead.xMax = frameIndex;
+                    chart.update('none');
+                }
+            });
+
+            // Update values
+            const xf = metricsData.x_factor[frameIndex];
+            const speed = metricsData.wrist_speed[frameIndex];
+            const knee = metricsData.knee_angle[frameIndex];
+            const elbow = metricsData.elbow_angle[frameIndex];
+            const weight = metricsData.weight_distribution[frameIndex];
+
+            document.getElementById('xfactorValue').textContent = `${xf >= 0 ? '+' : ''}${xf.toFixed(1)}°`;
+            document.getElementById('speedValue').textContent = `${speed.toFixed(1)} m/s`;
+            document.getElementById('kneeValue').textContent = `${knee.toFixed(0)}°`;
+            document.getElementById('elbowValue').textContent = `${elbow.toFixed(0)}°`;
+
+            // Update bars
+            document.getElementById('xfactorBar').style.width = `${Math.min(100, Math.abs(xf) / 60 * 100)}%`;
+            document.getElementById('speedBar').style.width = `${Math.min(100, speed / 25 * 100)}%`;
+            document.getElementById('kneeBar').style.width = `${(180 - knee) / 80 * 100}%`;
+            document.getElementById('elbowBar').style.width = `${elbow / 180 * 100}%`;
+
+            // Weight distribution
+            const weightPercent = (weight + 1) / 2 * 100;
+            document.getElementById('weightMarker').style.left = `${weightPercent}%`;
+            document.getElementById('weightValue').textContent =
+                weight < -0.3 ? '← Left' : weight > 0.3 ? 'Right →' : 'Center';
+
+            // Phase detection (simplified)
+            let phase = '—';
+            if (Math.abs(xf) > 30) phase = '🔄 Loading';
+            else if (speed > 10) phase = '⚡ Acceleration';
+            else if (knee < 140) phase = '🦵 Preparation';
+            document.getElementById('phaseValue').textContent = phase;
+        }
+
+        function togglePlay() {
+            if (video.paused) {
+                video.play();
+            } else {
+                video.pause();
+            }
+        }
+
+        function stepForward() {
+            video.currentTime = Math.min(video.duration, video.currentTime + 1/fps);
+        }
+
+        function stepBackward() {
+            video.currentTime = Math.max(0, video.currentTime - 1/fps);
+        }
+
+        function setPlaybackRate(rate) {
+            video.playbackRate = rate;
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            const ms = Math.floor((seconds % 1) * 100);
+            return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+        }
+    </script>
+</body>
+</html>
