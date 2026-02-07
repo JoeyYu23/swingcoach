@@ -4,6 +4,7 @@ FastAPI server for tennis swing analysis.
 """
 
 import asyncio
+import logging
 import os
 import tempfile
 import time
@@ -18,10 +19,10 @@ from pydantic import BaseModel
 
 from dotenv import load_dotenv
 
-from pose import MediaPipeBackend, AngleCalculator, PoseResult
-from analysis import TennisSwingAnalyzer
-from gemini_service import analyze_video_with_gemini, generate_tts_audio
+from vision_provider import analyze_video, generate_tts, get_provider_name
 from network_info import get_local_ip, get_connection_url
+
+logger = logging.getLogger(__name__)
 
 # Load .env file (for GEMINI_API_KEY etc.)
 load_dotenv()
@@ -41,9 +42,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global instances
-pose_backend: Optional[MediaPipeBackend] = None
-analyzer: Optional[TennisSwingAnalyzer] = None
+# Global instances (types resolved at runtime in startup)
+pose_backend = None
+analyzer = None
 
 PORT = 8001
 
@@ -126,25 +127,37 @@ async def startup():
     """Initialize pose estimation backend on startup."""
     global pose_backend, analyzer
 
-    pose_backend = MediaPipeBackend(
-        model_complexity=1,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
+    try:
+        from pose import MediaPipeBackend
+        from analysis import TennisSwingAnalyzer
 
-    if not pose_backend.initialize():
-        raise RuntimeError("Failed to initialize pose estimation backend")
+        pose_backend = MediaPipeBackend(
+            model_complexity=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+        )
 
-    analyzer = TennisSwingAnalyzer(handedness='right')
+        if not pose_backend.initialize():
+            logger.warning("MediaPipe failed to initialize — pose analysis disabled")
+            pose_backend = None
+        else:
+            analyzer = TennisSwingAnalyzer(handedness='right')
+    except Exception as e:
+        logger.warning("MediaPipe unavailable (%s) — pose analysis disabled", e)
+        pose_backend = None
+        analyzer = None
 
+    provider = get_provider_name()
     ip = get_local_ip()
     url = get_connection_url(PORT)
     print(f"SwingCoach API ready!")
+    print(f"  Vision provider: {provider}")
+    print(f"  Pose estimation: {'available' if pose_backend else 'unavailable'}")
     print(f"  LAN IP:  {ip}")
     print(f"  Phone connect URL: {url}")
     print(f"  Endpoints:")
     print(f"    POST {url}/api/analyze-video   (pose only)")
-    print(f"    POST {url}/api/analyze-swing   (pose + Gemini + TTS)")
+    print(f"    POST {url}/api/analyze-swing   (pose + vision + TTS)")
     print(f"    GET  {url}/api/network-info")
 
 
@@ -159,7 +172,11 @@ async def shutdown():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "ok", "backend": "mediapipe"}
+    return {
+        "status": "ok",
+        "vision_provider": get_provider_name(),
+        "pose": "available" if pose_backend else "unavailable",
+    }
 
 
 def rotate_frame(frame: np.ndarray, rotation: int) -> np.ndarray:
@@ -176,8 +193,8 @@ def rotate_frame(frame: np.ndarray, rotation: int) -> np.ndarray:
 def _analyze_video_sync(
     tmp_path: str,
     rotation: int,
-    pose_backend_inst: MediaPipeBackend,
-    analyzer_inst: TennisSwingAnalyzer,
+    pose_backend_inst,
+    analyzer_inst,
 ) -> AnalysisResponse:
     """Run pose estimation + swing analysis on a video file (CPU-bound, synchronous).
 
@@ -216,6 +233,7 @@ def _analyze_video_sync(
         feedback = "Great swing! Keep up the good work."
 
     # Build time series data with all angles
+    from pose import AngleCalculator
     calc = AngleCalculator(use_3d=True)
     frames_data = []
     contact_angles = None
@@ -277,7 +295,7 @@ def _analyze_video_sync(
 
 
 @app.post("/api/analyze-video", response_model=AnalysisResponse)
-async def analyze_video(file: UploadFile = File(...), rotation: int = 0):
+async def analyze_video_endpoint(file: UploadFile = File(...), rotation: int = 0):
     """
     Analyze a tennis swing video (pose estimation only).
 
@@ -291,7 +309,7 @@ async def analyze_video(file: UploadFile = File(...), rotation: int = 0):
     global pose_backend, analyzer
 
     if not pose_backend or not analyzer:
-        raise HTTPException(status_code=500, detail="Backend not initialized")
+        raise HTTPException(status_code=503, detail="Pose estimation unavailable")
 
     suffix = os.path.splitext(file.filename)[1] or ".mp4"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -314,22 +332,19 @@ async def analyze_swing(
     rotation: int = Form(0),
 ):
     """
-    Combined analysis: MediaPipe pose (edge) + Gemini vision (cloud) + TTS.
+    Combined analysis: MediaPipe pose (edge) + vision (cloud/local) + TTS.
 
-    Runs pose estimation and Gemini vision in parallel, then TTS sequentially.
-    Designed for phone → PC → phone pipeline.
+    Runs pose estimation and vision analysis in parallel, then TTS sequentially.
+    Designed for phone -> PC -> phone pipeline.
 
     Args:
         file: Video file (mp4, mov, etc.)
         rotation: Rotation angle (0, 90, 180, 270)
 
     Returns:
-        Combined pose analysis, Gemini feedback, TTS audio, and timing metadata
+        Combined pose analysis, vision feedback, TTS audio, and timing metadata
     """
     global pose_backend, analyzer
-
-    if not pose_backend or not analyzer:
-        raise HTTPException(status_code=500, detail="Backend not initialized")
 
     # Save uploaded file
     suffix = os.path.splitext(file.filename or "video.mp4")[1] or ".mp4"
@@ -340,51 +355,56 @@ async def analyze_swing(
 
     try:
         overall_start = time.time()
-
-        # --- Run pose and Gemini in parallel ---
         loop = asyncio.get_event_loop()
 
-        pose_task = loop.run_in_executor(
-            None, _analyze_video_sync, tmp_path, rotation, pose_backend, analyzer
-        )
-        gemini_task = analyze_video_with_gemini(video_bytes, "video/mp4")
-
         pose_result: Optional[AnalysisResponse] = None
-        gemini_result = None
+        vision_result = None
         pose_error = None
-        gemini_error = None
+        vision_error = None
 
-        # Gather both, catching errors independently
-        results = await asyncio.gather(pose_task, gemini_task, return_exceptions=True)
-
-        if isinstance(results[0], Exception):
-            pose_error = str(results[0])
+        # --- Run pose (if available) and vision in parallel ---
+        if pose_backend and analyzer:
+            pose_coro = loop.run_in_executor(
+                None, _analyze_video_sync, tmp_path, rotation, pose_backend, analyzer
+            )
+            results = await asyncio.gather(
+                pose_coro,
+                analyze_video(video_bytes, "video/mp4"),
+                return_exceptions=True,
+            )
+            if isinstance(results[0], Exception):
+                pose_error = str(results[0])
+            else:
+                pose_result = results[0]
+            if isinstance(results[1], Exception):
+                vision_error = str(results[1])
+            else:
+                vision_result = results[1]
         else:
-            pose_result = results[0]
-
-        if isinstance(results[1], Exception):
-            gemini_error = str(results[1])
-        else:
-            gemini_result = results[1]
+            pose_error = "MediaPipe unavailable — pose analysis skipped"
+            try:
+                vision_result = await analyze_video(video_bytes, "video/mp4")
+            except Exception as e:
+                vision_error = str(e)
 
         parallel_done = time.time()
 
-        # --- TTS (sequential, only if Gemini succeeded) ---
+        # --- TTS (sequential, only if vision succeeded) ---
         audio_base64 = None
-        if gemini_result:
-            audio_base64 = await generate_tts_audio(gemini_result.feedback_text)
+        if vision_result:
+            audio_base64 = await generate_tts(vision_result.feedback_text)
 
         total_elapsed = time.time() - overall_start
 
         return CompleteAnalysisResponse(
             pose_analysis=pose_result,
-            gemini_analysis=GeminiResult(**gemini_result.to_dict()) if gemini_result else None,
+            gemini_analysis=GeminiResult(**vision_result.to_dict()) if vision_result else None,
             audio_base64=audio_base64,
             processing_info={
                 "total_seconds": round(total_elapsed, 2),
                 "parallel_seconds": round(parallel_done - overall_start, 2),
                 "pose_error": pose_error,
-                "gemini_error": gemini_error,
+                "vision_error": vision_error,
             },
         )
 
@@ -422,7 +442,7 @@ async def analyze_frame(file: UploadFile = File(...)):
     global pose_backend
 
     if not pose_backend:
-        raise HTTPException(status_code=500, detail="Backend not initialized")
+        raise HTTPException(status_code=503, detail="Pose estimation unavailable")
 
     content = await file.read()
     nparr = np.frombuffer(content, np.uint8)
@@ -436,6 +456,7 @@ async def analyze_frame(file: UploadFile = File(...)):
     if not pose_result or not pose_result.is_valid():
         raise HTTPException(status_code=400, detail="Could not detect pose in image")
 
+    from pose import AngleCalculator
     calc = AngleCalculator(use_3d=True)
     angles = calc.calculate_all_angles(pose_result)
     metrics = calc.calculate_posture_metrics(pose_result)
@@ -462,7 +483,7 @@ async def annotate_video(file: UploadFile = File(...), rotation: int = 0):
     global pose_backend
 
     if not pose_backend:
-        raise HTTPException(status_code=500, detail="Backend not initialized")
+        raise HTTPException(status_code=503, detail="Pose estimation unavailable")
 
     # Save uploaded file
     suffix = os.path.splitext(file.filename)[1] or ".mp4"
@@ -490,6 +511,7 @@ async def annotate_video(file: UploadFile = File(...), rotation: int = 0):
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
+        from pose import AngleCalculator
         calc = AngleCalculator(use_3d=True)
 
         while True:

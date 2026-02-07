@@ -39,3 +39,15 @@ def test_client():
 def has_gemini_key() -> bool:
     """Return True if a Gemini API key is available."""
     return bool(os.environ.get("GEMINI_API_KEY"))
+
+
+@pytest.fixture
+def has_lmstudio() -> bool:
+    """Return True if LM Studio is reachable."""
+    import httpx
+    url = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
+    try:
+        resp = httpx.get(f"{url}/v1/models", timeout=3.0)
+        return resp.status_code == 200
+    except Exception:
+        return False

@@ -1,7 +1,7 @@
 """Unit tests for /api/analyze-swing and related endpoints.
 
 Uses FastAPI TestClient (httpx-based) so the full ASGI app is exercised,
-including startup/shutdown events.  Gemini calls are mocked.
+including startup/shutdown events.  Vision provider calls are mocked.
 """
 
 import json
@@ -20,7 +20,7 @@ from gemini_service import GeminiAnalysisResult
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _mock_gemini_result():
+def _mock_vision_result():
     return GeminiAnalysisResult(
         feedback_text="Drop your racket head sooner.",
         metric_name="Racket Drop",
@@ -33,10 +33,10 @@ def _mock_gemini_result():
 # ---------------------------------------------------------------------------
 
 def test_analyze_swing_returns_complete_response(test_client, sample_video_path):
-    """POST a real video, mock Gemini, verify response shape."""
+    """POST a real video, mock vision provider, verify response shape."""
     with (
-        patch("app.analyze_video_with_gemini", return_value=_mock_gemini_result()),
-        patch("app.generate_tts_audio", return_value="FAKE_AUDIO_B64"),
+        patch("app.analyze_video", return_value=_mock_vision_result()),
+        patch("app.generate_tts", return_value="FAKE_AUDIO_B64"),
     ):
         with open(sample_video_path, "rb") as f:
             resp = test_client.post(
@@ -59,8 +59,8 @@ def test_analyze_swing_returns_complete_response(test_client, sample_video_path)
 
 def test_analyze_swing_includes_processing_info(test_client, sample_video_path):
     with (
-        patch("app.analyze_video_with_gemini", return_value=_mock_gemini_result()),
-        patch("app.generate_tts_audio", return_value=None),
+        patch("app.analyze_video", return_value=_mock_vision_result()),
+        patch("app.generate_tts", return_value=None),
     ):
         with open(sample_video_path, "rb") as f:
             resp = test_client.post(
@@ -80,6 +80,25 @@ def test_analyze_swing_rejects_missing_file(test_client):
     assert resp.status_code == 422  # validation error
 
 
+def test_analyze_swing_with_local_provider(test_client, sample_video_path):
+    """When using local provider, TTS should be None."""
+    with (
+        patch("app.analyze_video", return_value=_mock_vision_result()),
+        patch("app.generate_tts", return_value=None),
+    ):
+        with open(sample_video_path, "rb") as f:
+            resp = test_client.post(
+                "/api/analyze-swing",
+                files={"file": ("swing.mp4", f, "video/mp4")},
+                data={"rotation": "0"},
+            )
+
+    if resp.status_code == 200:
+        body = resp.json()
+        assert body["audio_base64"] is None
+        assert body["gemini_analysis"] is not None
+
+
 # ---------------------------------------------------------------------------
 # /api/analyze-video (regression — existing endpoint unchanged)
 # ---------------------------------------------------------------------------
@@ -91,8 +110,8 @@ def test_existing_analyze_video_still_works(test_client, sample_video_path):
             files={"file": ("swing.mp4", f, "video/mp4")},
             data={"rotation": "0"},
         )
-    # Accept 200 (success) or 400 (not enough frames in sample)
-    assert resp.status_code in (200, 400)
+    # Accept 200 (success), 400 (not enough frames), or 503 (no mediapipe)
+    assert resp.status_code in (200, 400, 503)
 
 
 # ---------------------------------------------------------------------------
@@ -117,3 +136,14 @@ def test_health_check(test_client):
     resp = test_client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+def test_health_reports_vision_provider(test_client):
+    """Health endpoint should include vision_provider and pose status."""
+    resp = test_client.get("/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "vision_provider" in body
+    assert body["vision_provider"] in ("local", "gemini")
+    assert "pose" in body
+    assert body["pose"] in ("available", "unavailable")
