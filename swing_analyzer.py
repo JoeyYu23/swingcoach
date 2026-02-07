@@ -22,7 +22,8 @@ FILTER_ORDER = 2
 # ── Phase detection thresholds ─────────────────────────────────────────
 ACCEL_DERIV_THRESH = 0.05   # fraction of peak derivative to mark acceleration start
 DECEL_DERIV_THRESH = 0.05   # fraction of peak negative derivative to mark decel end
-MIN_PEAK_GYRO_RAD = 5.0     # ignore swings below this gyro magnitude (rad/s)
+MIN_PEAK_GYRO_RAD = 1.0     # ignore swings below this gyro magnitude (rad/s)
+DECEL_ACCEL_THRESH = 30.0   # deceleration ends when accel mag drops below this (m/s²)
 
 
 def _build_filter():
@@ -56,17 +57,15 @@ def _smooth(signal):
     return sosfiltfilt(_SOS, signal)
 
 
-def _find_phase_boundaries(t_ms, gyro_mag_smooth):
+def _find_phase_boundaries(t_ms, gyro_mag_smooth, accel_mag_smooth):
     """
-    Return phase boundary timestamps using the first derivative of gyro magnitude.
+    Return phase boundary timestamps using gyro magnitude for the peak and
+    acceleration start, and accel magnitude for the deceleration end.
 
     Returns dict with keys:
         accel_start_ms, peak_ms, decel_end_ms
     or None if no valid swing detected.
     """
-    dt = np.gradient(t_ms) / 1000.0                    # seconds
-    deriv = np.gradient(gyro_mag_smooth) / dt           # rad/s^2
-
     # Find the dominant peak in the smoothed gyro magnitude
     peaks, props = find_peaks(
         gyro_mag_smooth,
@@ -92,11 +91,11 @@ def _find_phase_boundaries(t_ms, gyro_mag_smooth):
             accel_start_idx = i
             break
 
-    # ── Deceleration end: walk right from peak until gyro mag drops
-    #    below the same fraction ──
-    decel_end_idx = len(gyro_mag_smooth) - 1
-    for i in range(best + 1, len(gyro_mag_smooth)):
-        if gyro_mag_smooth[i] < accel_thresh:
+    # ── Deceleration end: walk right from peak until accel magnitude
+    #    drops below DECEL_ACCEL_THRESH (m/s²) ──
+    decel_end_idx = len(accel_mag_smooth) - 1
+    for i in range(best + 1, len(accel_mag_smooth)):
+        if accel_mag_smooth[i] < DECEL_ACCEL_THRESH:
             decel_end_idx = i
             break
 
@@ -146,7 +145,7 @@ def analyze_swing(samples):
     accel_mag = _smooth(accel_mag_raw)
 
     # Phase detection
-    boundaries = _find_phase_boundaries(t, gyro_mag)
+    boundaries = _find_phase_boundaries(t, gyro_mag, accel_mag)
 
     if boundaries is None:
         return {

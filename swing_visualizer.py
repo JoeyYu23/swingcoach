@@ -56,7 +56,8 @@ def plot_swing(result, event_number=0, out_dir=PLOT_DIR):
     str  – path to the saved PNG, or None on error.
     """
     phases = result.get("phases")
-    if phases is None:
+
+    if "t_ms" not in result:
         return None
 
     os.makedirs(out_dir, exist_ok=True)
@@ -75,25 +76,29 @@ def plot_swing(result, event_number=0, out_dir=PLOT_DIR):
         2, 1, figsize=(10, 6), sharex=True,
         gridspec_kw={"hspace": 0.12},
     )
-    fig.suptitle(f"Swing Event #{event_number}", fontsize=14, fontweight="bold", y=0.97)
+    title = f"Swing Event #{event_number}"
+    if phases is None:
+        title += "  (no phases detected)"
+    fig.suptitle(title, fontsize=14, fontweight="bold", y=0.97)
 
-    # ── Shade phase regions on both axes ───────────────────────────
-    phase_spans = [
-        ("preparation",    phases["preparation"]["start_ms"],    phases["preparation"]["end_ms"]),
-        ("acceleration",   phases["acceleration"]["start_ms"],   phases["acceleration"]["end_ms"]),
-        ("deceleration",   phases["deceleration"]["start_ms"],   phases["deceleration"]["end_ms"]),
-        ("follow_through", phases["follow_through"]["start_ms"], phases["follow_through"]["end_ms"]),
-    ]
+    # ── Shade phase regions on both axes (only if phases detected) ─
+    if phases is not None:
+        phase_spans = [
+            ("preparation",    phases["preparation"]["start_ms"],    phases["preparation"]["end_ms"]),
+            ("acceleration",   phases["acceleration"]["start_ms"],   phases["acceleration"]["end_ms"]),
+            ("deceleration",   phases["deceleration"]["start_ms"],   phases["deceleration"]["end_ms"]),
+            ("follow_through", phases["follow_through"]["start_ms"], phases["follow_through"]["end_ms"]),
+        ]
 
-    for ax in (ax_g, ax_a):
-        for name, s_ms, e_ms in phase_spans:
-            ax.axvspan(s_ms - t0, e_ms - t0,
-                       color=PHASE_COLORS[name], alpha=0.55, zorder=0)
+        for ax in (ax_g, ax_a):
+            for name, s_ms, e_ms in phase_spans:
+                ax.axvspan(s_ms - t0, e_ms - t0,
+                           color=PHASE_COLORS[name], alpha=0.55, zorder=0)
 
-    # Peak line
-    peak_t_rel = phases["peak"]["t_ms"] - t0
-    for ax in (ax_g, ax_a):
-        ax.axvline(peak_t_rel, color="#e67e22", ls="--", lw=1.5, alpha=0.8, zorder=1)
+        # Peak line
+        peak_t_rel = phases["peak"]["t_ms"] - t0
+        for ax in (ax_g, ax_a):
+            ax.axvline(peak_t_rel, color="#e67e22", ls="--", lw=1.5, alpha=0.8, zorder=1)
 
     # ── Gyro panel ─────────────────────────────────────────────────
     ax_g.plot(t_rel, gyro_raw, color="#adb5bd", lw=0.8, label="Raw", zorder=2)
@@ -101,15 +106,16 @@ def plot_swing(result, event_number=0, out_dir=PLOT_DIR):
     ax_g.set_ylabel("Gyro magnitude (rad/s)")
     ax_g.legend(loc="upper right", fontsize=8)
 
-    # Annotate peak value
-    peak_val = phases["peak"]["gyro_mag_deg_s"]
-    ax_g.annotate(
-        f"{peak_val:.0f} deg/s",
-        xy=(peak_t_rel, phases["peak"]["gyro_mag_rad_s"]),
-        xytext=(15, 10), textcoords="offset points",
-        fontsize=9, fontweight="bold", color="#e67e22",
-        arrowprops=dict(arrowstyle="->", color="#e67e22", lw=1.2),
-    )
+    # Annotate peak value (only if phases detected)
+    if phases is not None:
+        peak_val = phases["peak"]["gyro_mag_deg_s"]
+        ax_g.annotate(
+            f"{peak_val:.0f} deg/s",
+            xy=(peak_t_rel, phases["peak"]["gyro_mag_rad_s"]),
+            xytext=(15, 10), textcoords="offset points",
+            fontsize=9, fontweight="bold", color="#e67e22",
+            arrowprops=dict(arrowstyle="->", color="#e67e22", lw=1.2),
+        )
 
     # ── Accel panel ────────────────────────────────────────────────
     ax_a.plot(t_rel, accel, color="#dc3545", lw=2, zorder=3)
@@ -117,12 +123,13 @@ def plot_swing(result, event_number=0, out_dir=PLOT_DIR):
     ax_a.set_xlabel("Time (ms)")
 
     # ── Phase labels at top of gyro panel ──────────────────────────
-    y_top = ax_g.get_ylim()[1]
-    for name, s_ms, e_ms in phase_spans:
-        mid = ((s_ms + e_ms) / 2.0) - t0
-        ax_g.text(mid, y_top * 0.92, PHASE_LABELS[name],
-                  ha="center", va="top", fontsize=8, fontstyle="italic",
-                  color="#495057")
+    if phases is not None:
+        y_top = ax_g.get_ylim()[1]
+        for name, s_ms, e_ms in phase_spans:
+            mid = ((s_ms + e_ms) / 2.0) - t0
+            ax_g.text(mid, y_top * 0.92, PHASE_LABELS[name],
+                      ha="center", va="top", fontsize=8, fontstyle="italic",
+                      color="#495057")
 
     # ── Styling ────────────────────────────────────────────────────
     for ax in (ax_g, ax_a):

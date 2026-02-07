@@ -112,11 +112,13 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"    Deceleration:   {phases['deceleration']['start_ms']:.0f} – {phases['deceleration']['end_ms']:.0f} ms")
                 print(f"    Follow-through: {phases['follow_through']['start_ms']:.0f} – {phases['follow_through']['end_ms']:.0f} ms")
                 print(f"  Swing duration: {result['swing_duration_ms']:.0f} ms")
-                path = plot_swing(result, event_number=event_count)
-                if path:
-                    print(f"  Plot saved: {path}")
             else:
                 print(f"  No swing detected: {result.get('error')}")
+
+            # Always generate a plot for every swing event
+            path = plot_swing(result, event_number=event_count)
+            if path:
+                print(f"  Plot saved: {path}")
 
             print(f"{'='*70}\n")
 
