@@ -105,8 +105,8 @@ The app uses a **phone + PC split architecture** designed for the Snapdragon eco
 
 ```powershell
 # Clone the repo
-git clone https://github.com/nbzy1995/MultiverseHackathon.git
-cd MultiverseHackathon
+git clone https://github.com/JoeyYu23/swingcoach.git
+cd swingcoach
 
 # Create Python virtual environment
 cd backend
@@ -153,7 +153,7 @@ Note the **Phone connect URL** -- you'll enter this in the Android app.
 **Option A: Install pre-built APK**
 
 ```powershell
-adb install app-debug.apk
+adb install swingcoach-debug.apk
 ```
 
 **Option B: Build from source**
