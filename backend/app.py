@@ -4,10 +4,13 @@ FastAPI server for tennis swing analysis.
 """
 
 import asyncio
+import csv
 import logging
 import os
 import tempfile
 import time
+from datetime import datetime
+from pathlib import Path
 
 from typing import List, Optional
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
@@ -91,6 +94,8 @@ class AnalysisResponse(BaseModel):
     contact_posture: Optional[dict] = None
     # Time series data
     frames: List[FrameData]
+    # Pose data CSV file path
+    pose_data_file: Optional[str] = None
 
 
 class FrameAngles(BaseModel):
@@ -187,6 +192,45 @@ def rotate_frame(frame, rotation: int):
     elif rotation == 270:
         return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
     return frame
+
+
+def save_pose_to_csv(pose_results) -> str:
+    """Save 3D pose data to CSV file.
+
+    Args:
+        pose_results: List of PoseResult objects from video analysis
+
+    Returns:
+        Path to the saved CSV file
+    """
+    data_dir = Path(__file__).parent / "data"
+    data_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"pose_3d_{timestamp}.csv"
+    filepath = data_dir / filename
+
+    with open(filepath, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            'frame_index', 'keypoint_name', 'x', 'y', 'z',
+            'world_x', 'world_y', 'world_z', 'visibility'
+        ])
+        for frame_idx, pose in enumerate(pose_results):
+            for kp in pose.keypoints:
+                writer.writerow([
+                    frame_idx,
+                    kp.name,
+                    kp.x,
+                    kp.y,
+                    kp.z,
+                    kp.world_x,
+                    kp.world_y,
+                    kp.world_z,
+                    kp.visibility
+                ])
+
+    return str(filepath)
 
 
 def _analyze_video_sync(
@@ -291,6 +335,7 @@ def _analyze_video_sync(
         contact_angles=contact_angles,
         contact_posture=contact_posture,
         frames=frames_data,
+        pose_data_file=save_pose_to_csv(pose_results),
     )
 
 
