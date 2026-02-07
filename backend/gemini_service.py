@@ -8,6 +8,8 @@ import os
 from google import genai
 from google.genai import types
 
+from prompts import SYSTEM_PROMPT, VISION_PROMPT
+
 
 _client: genai.Client | None = None
 
@@ -38,18 +40,6 @@ class GeminiAnalysisResult:
         }
 
 
-VISION_PROMPT = """You are a professional, direct, and elite Tennis Coach.
-Analyze this short video clip of a tennis swing.
-
-Identify the ONE single biggest flaw that the player needs to fix immediately.
-Do not give a list. Give one specific correction.
-
-Return the result in JSON format with these fields:
-- feedback_text: A direct, spoken-style command to the player (max 15 words). e.g., "You are muscling it. Drop the racket head sooner."
-- metric_name: A technical term for the issue. e.g., "Contact Point", "Racket Drop", "Follow Through".
-- metric_value: The specific observation. e.g., "Too Close to Body", "Late", "Abbreviated"."""
-
-
 async def analyze_video_with_gemini(
     video_bytes: bytes, mime_type: str = "video/mp4"
 ) -> GeminiAnalysisResult:
@@ -75,6 +65,7 @@ async def analyze_video_with_gemini(
                 ]
             ),
             config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT or None,
                 response_mime_type="application/json",
             ),
         )

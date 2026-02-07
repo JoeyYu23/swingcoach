@@ -19,6 +19,8 @@ from typing import List
 import httpx
 from PIL import Image
 
+from prompts import SYSTEM_PROMPT, VISION_PROMPT
+
 logger = logging.getLogger(__name__)
 
 # Configuration via environment variables
@@ -26,19 +28,6 @@ LMSTUDIO_URL = os.environ.get("LMSTUDIO_URL", "http://localhost:1234")
 LMSTUDIO_MODEL = os.environ.get("LMSTUDIO_MODEL", "qwen2.5-vl-7b-instruct")
 NUM_FRAMES = int(os.environ.get("NUM_FRAMES", "6"))
 MAX_FRAME_DIM = int(os.environ.get("MAX_FRAME_DIM", "512"))
-
-# Same prompt used by gemini_service.py — duplicated here to avoid importing
-# google.genai at module level (which fails when google-genai isn't installed).
-VISION_PROMPT = """You are a professional, direct, and elite Tennis Coach.
-Analyze this short video clip of a tennis swing.
-
-Identify the ONE single biggest flaw that the player needs to fix immediately.
-Do not give a list. Give one specific correction.
-
-Return the result in JSON format with these fields:
-- feedback_text: A direct, spoken-style command to the player (max 15 words). e.g., "You are muscling it. Drop the racket head sooner."
-- metric_name: A technical term for the issue. e.g., "Contact Point", "Racket Drop", "Follow Through".
-- metric_value: The specific observation. e.g., "Too Close to Body", "Late", "Abbreviated"."""
 
 
 class LmStudioAnalysisResult:
@@ -219,9 +208,14 @@ async def analyze_video_with_lmstudio(
         })
     content.append({"type": "text", "text": VISION_PROMPT})
 
+    messages = []
+    if SYSTEM_PROMPT:
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
+    messages.append({"role": "user", "content": content})
+
     payload = {
         "model": LMSTUDIO_MODEL,
-        "messages": [{"role": "user", "content": content}],
+        "messages": messages,
         "temperature": 0.3,
         "max_tokens": 300,
     }
