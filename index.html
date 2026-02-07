@@ -851,59 +851,59 @@
             document.getElementById('minKnee').textContent = `${minKnee.toFixed(0)}°`;
 
             // Generate detailed coaching paragraph
-            let p = '从视频分析来看，';
+            let p = 'Based on the video analysis, ';
 
             // Opening assessment
             const score = (maxXF >= 40 ? 1 : 0) + (maxSpeed >= 12 ? 1 : 0) + (minKnee <= 130 ? 1 : 0);
             if (score >= 3) {
-                p += '你的正手击球动作整体质量很高。';
+                p += 'your forehand technique shows excellent overall quality. ';
             } else if (score >= 2) {
-                p += '你的正手击球有不错的基础，还有一些可以优化的地方。';
+                p += 'your forehand has a solid foundation with some areas for improvement. ';
             } else {
-                p += '你的正手击球有几个关键点需要加强。';
+                p += 'there are several key areas in your forehand that need attention. ';
             }
 
             // X-Factor feedback
             if (maxXF >= 50) {
-                p += `肩胯分离达到了 ${maxXF.toFixed(0)}°，这是职业水平的转体幅度，能够产生很大的弹弓效应。`;
+                p += `Your hip-shoulder separation reaches ${maxXF.toFixed(0)}°, which is professional-level rotation that creates a powerful slingshot effect. `;
             } else if (maxXF >= 35) {
-                p += `肩胯分离 ${maxXF.toFixed(0)}° 表现不错，引拍时髋部先行启动，肩膀跟随转动，蓄力比较充分。`;
+                p += `Hip-shoulder separation of ${maxXF.toFixed(0)}° is solid - your hips lead the rotation well, creating good elastic energy storage. `;
             } else if (maxXF >= 20) {
-                p += `肩胯分离只有 ${maxXF.toFixed(0)}°，建议引拍时先转髋再转肩，让身体像拧毛巾一样蓄力。`;
+                p += `Hip-shoulder separation of only ${maxXF.toFixed(0)}° - try rotating your hips first, then shoulders, like wringing a towel to store energy. `;
             } else {
-                p += `肩胯分离不足 ${maxXF.toFixed(0)}°，需要重点练习转体动作，这是力量的主要来源。`;
+                p += `Hip-shoulder separation under ${maxXF.toFixed(0)}° needs work - focus on rotation mechanics as this is your main power source. `;
             }
 
             // Speed feedback
             if (maxSpeed >= 18) {
-                p += `挥拍速度达到 ${maxSpeed.toFixed(1)} m/s，加速非常有力，手腕鞭打动作很流畅。`;
+                p += `Racket speed of ${maxSpeed.toFixed(1)} m/s shows powerful acceleration with excellent wrist snap. `;
             } else if (maxSpeed >= 12) {
-                p += `挥拍速度 ${maxSpeed.toFixed(1)} m/s 处于中上水平，可以尝试放松握拍让手腕更自由地加速。`;
+                p += `Racket speed of ${maxSpeed.toFixed(1)} m/s is above average - try loosening your grip to let the wrist accelerate more freely. `;
             } else if (maxSpeed >= 6) {
-                p += `挥拍速度 ${maxSpeed.toFixed(1)} m/s 偏低，可能是手臂太紧张，试着用"甩鞭子"的感觉来挥拍。`;
+                p += `Racket speed of ${maxSpeed.toFixed(1)} m/s is low - you may be too tense. Try the "whip" feeling when swinging. `;
             } else {
-                p += `挥拍速度只有 ${maxSpeed.toFixed(1)} m/s，需要练习放松和加速的节奏感。`;
+                p += `Racket speed of only ${maxSpeed.toFixed(1)} m/s - practice relaxation and acceleration rhythm. `;
             }
 
             // Knee feedback
             if (minKnee <= 110) {
-                p += `膝盖弯曲到 ${minKnee.toFixed(0)}°，腿部蓄力很充分，能够很好地利用地面反作用力。`;
+                p += `Knee bend to ${minKnee.toFixed(0)}° shows excellent leg loading, maximizing ground reaction force. `;
             } else if (minKnee <= 140) {
-                p += `膝盖弯曲 ${minKnee.toFixed(0)}° 还可以，击球时记得用腿蹬地发力。`;
+                p += `Knee bend of ${minKnee.toFixed(0)}° is decent - remember to push up through your legs at contact. `;
             } else {
-                p += `膝盖弯曲不够（${minKnee.toFixed(0)}°），站得太直会限制力量传递，试着降低重心准备击球。`;
+                p += `Knee bend of ${minKnee.toFixed(0)}° is insufficient - standing too tall limits power transfer. Lower your center of gravity. `;
             }
 
             // Drill suggestion
             p += '<br><br>💡 ';
             if (maxXF < 35) {
-                p += '<b>推荐练习：</b>背对墙站立，做转体动作让肩膀碰墙，感受髋肩分离。每天50次。';
+                p += '<b>Recommended Drill:</b> Stand with back to wall, practice rotation until shoulder touches wall. Feel the hip-shoulder separation. 50 reps daily.';
             } else if (maxSpeed < 12) {
-                p += '<b>推荐练习：</b>用旧袜子装网球做成"甩球"，练习手腕鞭打动作。放松是关键！';
+                p += '<b>Recommended Drill:</b> Put a tennis ball in an old sock and practice the whipping motion. Relaxation is key!';
             } else if (minKnee > 140) {
-                p += '<b>推荐练习：</b>分腿跳接球练习，落地时膝盖弯曲缓冲，培养下蹲击球的习惯。';
+                p += '<b>Recommended Drill:</b> Practice split-step reception, bending knees on landing to develop the habit of loading before shots.';
             } else {
-                p += '<b>进阶建议：</b>动作质量很好！可以练习不同旋转和落点的变化，提升战术丰富度。';
+                p += '<b>Advanced Tip:</b> Your mechanics are solid! Work on varying spin and placement to expand your tactical options.';
             }
 
             document.getElementById('coachingTips').innerHTML = p;
