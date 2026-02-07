@@ -1,0 +1,3 @@
+dependencies:
+  esp32_bno08x:
+    git: https://github.com/myles-parfeniuk/esp32_BNO08x.git
