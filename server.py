@@ -11,6 +11,7 @@ import json
 import time
 import threading
 import socket
+import os
 
 # Stats
 live_count = 0
@@ -32,6 +33,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global live_count, live_samples, event_count, start_time
 
+        # Handle video upload endpoint
+        if self.path == "/upload-video":
+            self.handle_video_upload()
+            return
+
+        # Handle sensor data (existing functionality)
         length = int(self.headers["Content-Length"])
         raw = json.loads(self.rfile.read(length))
 
@@ -106,6 +113,48 @@ class Handler(BaseHTTPRequestHandler):
                       f"Rate: {rate:.0f} smp/s | "
                       f"Events so far: {event_count}")
 
+    def handle_video_upload(self):
+        """Handle video file upload from phone."""
+        try:
+            # Create videos directory if it doesn't exist
+            video_dir = "videos"
+            if not os.path.exists(video_dir):
+                os.makedirs(video_dir)
+
+            # Get content length and filename from headers
+            content_length = int(self.headers["Content-Length"])
+            filename = self.headers.get("X-Filename", f"video_{int(time.time() * 1000)}.mp4")
+
+            # Read the video data
+            video_data = self.rfile.read(content_length)
+
+            # Save to file
+            filepath = os.path.join(video_dir, filename)
+            with open(filepath, "wb") as f:
+                f.write(video_data)
+
+            # Respond with success
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            response = json.dumps({
+                "status": "success",
+                "filename": filename,
+                "size": len(video_data),
+                "path": filepath
+            })
+            self.wfile.write(response.encode())
+
+            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] VIDEO UPLOADED: {filename} ({len(video_data) / 1024 / 1024:.2f} MB)")
+
+        except Exception as e:
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            error_response = json.dumps({"status": "error", "message": str(e)})
+            self.wfile.write(error_response.encode())
+            print(f"\n[ERROR] Video upload failed: {e}")
+
     def log_message(self, format, *args):
         pass
 
@@ -148,8 +197,10 @@ def udp_live_server():
 if __name__ == "__main__":
     port = 7103
     print(f"Dual-mode server ready on 0.0.0.0:{port}")
-    print(f"  Live: 200Hz continuous stream")
-    print(f"  Event: 400Hz swing capture (200ms pre + 300ms post)")
-    print(f"Waiting for ESP32 data...\n")
+    print(f"  Sensor Data (POST /): ")
+    print(f"    - Live: 200Hz continuous stream")
+    print(f"    - Event: 400Hz swing capture (200ms pre + 300ms post)")
+    print(f"  Video Upload (POST /upload-video): Accept MP4/MOV files from phone")
+    print(f"Waiting for data...\n")
     threading.Thread(target=udp_live_server, daemon=True).start()
     ThreadedHTTPServer(("0.0.0.0", port), Handler).serve_forever()
